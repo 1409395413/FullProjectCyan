@@ -5,6 +5,9 @@
     "brandMark": "Cc",
     "footerNote": "摄影 · 剪辑 · 直播搭建 · AI 影像<br>让画面为目标服务。",
     "copyright": "© 2026 Cyan · Studio. 保留所有权利。",
+    "showBeian": true,
+    "icpBeian": "",
+    "policeBeian": "",
     "footerCols": [
       {
         "title": "作品",
@@ -141,7 +144,7 @@
         "media": {
           "kind": "video",
           "src": "",
-          "title": "主视觉视频占位",
+          "title": "主视觉短片",
           "hint": "建议 1920×1080 / MP4 / 15–30s",
           "badge": "4K · 60fps",
           "dur": "02:14"
@@ -344,7 +347,7 @@
           "media": {
             "kind": "image",
             "src": "",
-            "title": "直播间全景图占位",
+            "title": "直播间全景",
             "hint": "1920×1080",
             "badge": "Live"
           },
@@ -383,7 +386,7 @@
           "media": {
             "kind": "image",
             "src": "",
-            "title": "电商直播间占位",
+            "title": "电商直播现场",
             "hint": "1920×1080",
             "badge": "Live"
           },
@@ -422,7 +425,7 @@
           "media": {
             "kind": "image",
             "src": "",
-            "title": "发布会推流占位",
+            "title": "发布会推流现场",
             "hint": "1920×1080",
             "badge": "Live"
           },
@@ -590,11 +593,11 @@
           "v": "上海（可全国 / 远程协作）"
         },
         {
-          "k": "档期",
-          "v": "2026 Q4 起接受预约"
+      "k": "档期",
+      "v": "2026 Q4 起开放新项目"
         }
       ],
-      "formNote": "表单为静态占位，接入后端后可直接提交。",
+      "formNote": "留言会直接发送给我，通常 24 小时内回复。所填信息仅用于本次沟通，不会对外提供。",
       "submitLabel": "发送需求",
       "projectTypes": [
         "商业摄影",

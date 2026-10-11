@@ -116,7 +116,61 @@ public class ContentValidator {
         }
       }
     }
+    normalizeCaseMedia(node);
     return node;
+  }
+
+  /**
+   * 案例的双素材结构收敛 —— 幽灵素材的根在这。
+   * ---------------------------------------------------------------------------
+   * 老版本一个案例只能挂一条素材，字段是 {@code media}（对象）；后来改成 {@code mediaList}（数组）。
+   * 后台载入时有个 migrate：如果 mediaList 不存在就把 media 复制成它的第一条。
+   * 可一旦 mediaList 里已经有位置了（哪怕全是空占位），这次复制就不会发生 ——
+   * 于是 {@code media} 和 {@code mediaList} 并存，各自存着各自的图。
+   *
+   * <p>前台 caseMedia() 的兜底是「mediaList 取不到东西就退回渲染 media」，于是出现：
+   * 在案例里新加了素材位但还没填图，前台显示的却是 {@code media} 里那张旧图；
+   * 而后台的表单只认 mediaList，那条旧图看不见、删不掉 —— 成了幽灵素材。
+   *
+   * <p>规则（幂等，怎么重复保存都收敛到同一份）：
+   *   1. mediaList 里已经有真素材 → media 是被淘汰的旧数据，直接删；
+   *   2. mediaList 全是空占位 → 把 media 搬成 mediaList 的第一条，
+   *      后台立刻就能看见它，能改能删，前台也不再需要靠兜底逻辑显示；
+   *   3. 两边都没东西 → 删掉空的 media，别留个空对象占地方。
+   */
+  private void normalizeCaseMedia(ObjectNode node) {
+    JsonNode media = node.get("media");
+    JsonNode list = node.get("mediaList");
+    if (media == null || list == null) return;
+    // 只有案例item才是「media 是对象 + mediaList 是数组」这个组合，
+    // 普通模块的 media 本来就是数组，不会被误伤。
+    if (!media.isObject() || !list.isArray()) return;
+
+    com.fasterxml.jackson.databind.node.ArrayNode arr =
+        (com.fasterxml.jackson.databind.node.ArrayNode) list;
+    boolean hasReal = false;
+    for (JsonNode n : arr) {
+      if (n.isObject() && !n.path("src").asText("").isBlank()) {
+        hasReal = true;
+        break;
+      }
+    }
+
+    String legacySrc = media.path("src").asText("");
+    if (hasReal || legacySrc.isBlank()) {
+      node.remove("media");
+      return;
+    }
+
+    // 旧素材顶到第一条，其余非空的排在后面，空占位丢弃
+    com.fasterxml.jackson.databind.node.ArrayNode merged =
+        com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+    merged.add(media.deepCopy());
+    for (JsonNode n : arr) {
+      if (n.isObject() && !n.path("src").asText("").isBlank()) merged.add(n.deepCopy());
+    }
+    node.set("mediaList", merged);
+    node.remove("media");
   }
 
   private void walkArray(String fieldKey, com.fasterxml.jackson.databind.node.ArrayNode arr) {

@@ -42,7 +42,7 @@ async function submit() {
 
       <label class="f">
         <span>账号</span>
-        <input v-model="username" autocomplete="username" placeholder="Cyan" />
+        <input v-model="username" autocomplete="username" />
       </label>
       <label class="f">
         <span>密码</span>

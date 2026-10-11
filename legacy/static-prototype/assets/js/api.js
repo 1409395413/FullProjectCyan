@@ -4,8 +4,8 @@
    两种适配器，通过 window.API_MODE 或 localStorage 切换：
 
    1) 'local'（默认，开箱即用）
-      读：localStorage['yc:content']  → 没有则用 DEFAULT_CONTENT
-      写：localStorage['yc:content']
+      读：localStorage['Cyan:content']  → 没有则用 DEFAULT_CONTENT
+      写：localStorage['Cyan:content']
       后台编辑器 admin.html 就是写这里。
       素材上传：FileReader → dataURL（注意 localStorage 约 5MB 上限，
       正式环境请改用对象存储）。
@@ -19,9 +19,9 @@
       只要后端满足这四个接口，页面零改动切换。
    ========================================================================= */
 (function () {
-  var KEY = 'yc:content';
-  var MODE_KEY = 'yc:apiMode';
-  var BASE_KEY = 'yc:apiBase';
+  var KEY = 'Cyan:content';
+  var MODE_KEY = 'Cyan:apiMode';
+  var BASE_KEY = 'Cyan:apiBase';
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 

@@ -18,6 +18,8 @@ export type FieldType =
   | 'medialist'
   | 'group'
   | 'list'
+  /** 链接：可以从预置页面里挑一个，也可以自己填任意 URL / 锚点 */
+  | 'link'
 
 export interface FieldDef {
   key: string
@@ -36,6 +38,25 @@ export interface TypeDef {
   label: string
   hint?: string
   fields: FieldDef[]
+}
+
+/* ------------------------------ 预置页面 ------------------------------ */
+/**
+ * 站点里已经存在的静态页面。
+ * ---------------------------------------------------------------------------
+ * 后台填链接时可以直接从这里挑一个，不用记住路径；
+ * 这些页面放在 web/public/pages/ 下，构建时会原样拷进 dist，
+ * 由 Nginx 直出，不经过前端路由。
+ */
+export const PRESET_PAGES: { v: string; label: string }[] = [
+  { v: '/pages/wip.html', label: '预置页：功能开发中（请耐心等待）' },
+  { v: '/pages/coming-soon.html', label: '预置页：近期准备中' }
+]
+
+/** 判断一个链接值是否是预置页；自定义链接返回 '__custom' */
+export function presetKeyOf(value: string | undefined | null): string {
+  const v = String(value || '').trim()
+  return PRESET_PAGES.some((p) => p.v === v) ? v : '__custom'
 }
 
 /* ------------------------------ 公共字段 ------------------------------ */
@@ -185,7 +206,12 @@ export const TYPE_DEFS: TypeDef[] = [
         fields: [
           { key: 'title', label: '标题', type: 'text' },
           { key: 'desc', label: '描述', type: 'textarea' },
-          { key: 'media', label: '主图', type: 'media' },
+          {
+            key: 'mediaList',
+            label: '素材组',
+            type: 'medialist',
+            hint: '可放多个视频和图片混排；第一条是封面，其余在下方悬浮缩略条里点选切换观看'
+          },
           { key: 'specs', label: '参数表', type: 'kv' },
           { key: 'tags', label: '标签', type: 'stringlist' }
         ]
@@ -274,6 +300,24 @@ export const SITE_FIELDS: FieldDef[] = [
   { key: 'footerNote', label: '页脚简介', type: 'richtext' },
   { key: 'copyright', label: '版权行', type: 'text' },
   {
+    key: 'showBeian',
+    label: '显示备案信息',
+    type: 'switch',
+    hint: '关掉后页脚不显示备案号；号码可以留着，想恢复时再打开即可'
+  },
+  {
+    key: 'icpBeian',
+    label: 'ICP 备案号',
+    type: 'text',
+    hint: '如「粤ICP备2026xxxxxx号」。留空则不显示。备案下来后务必填上并保存，管局会抽查页脚'
+  },
+  {
+    key: 'policeBeian',
+    label: '公安备案号',
+    type: 'text',
+    hint: '如「粤公网安备 44010602000123号」。留空则不显示。网站上线 30 日内需到 beian.mps.gov.cn 提交'
+  },
+  {
     key: 'footerCols',
     label: '页脚分栏',
     type: 'list',
@@ -287,7 +331,13 @@ export const SITE_FIELDS: FieldDef[] = [
         titleKey: 'label',
         fields: [
           { key: 'label', label: '文字', type: 'text' },
-          { key: 'href', label: '链接', type: 'text' }
+          {
+            key: 'href',
+            label: '链接',
+            type: 'link',
+            hint: '可从预置页面里选，也可自己填 https:// 外链或 #锚点',
+            options: PRESET_PAGES
+          }
         ]
       }
     ]

@@ -2,11 +2,14 @@
   <!-- 液态毛玻璃底噪：没有这层，backdrop-filter 就没有可透的东西 -->
   <div class="mesh" aria-hidden="true"></div>
   <RouterView />
+  <!-- 昼夜切换 + 实时时钟：常驻左下角，滚动不跟随 -->
+  <ThemeDock />
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 import { RouterView } from 'vue-router'
+import ThemeDock from './components/ThemeDock.vue'
 
 /**
  * Liquid Glass 的"活"：让玻璃表面的镜面高光跟着指针跑。

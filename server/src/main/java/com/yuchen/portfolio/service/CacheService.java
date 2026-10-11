@@ -41,7 +41,7 @@ public class CacheService {
     this.redis = redis;
     this.enabled = enabled && redis != null;
     ScheduledExecutorService ses = Executors.newSingleThreadScheduledExecutor(r -> {
-      Thread t = new Thread(r, "yc-cache-sweeper");
+      Thread t = new Thread(r, "Cyan-cache-sweeper");
       t.setDaemon(true);
       return t;
     });
@@ -57,6 +57,7 @@ public class CacheService {
     if (useRedis()) {
       try {
         String v = redis.opsForValue().get(k);
+        markUp();
         if (v != null) return Optional.of(v);
       } catch (Exception e) {
         markDown();
@@ -77,6 +78,7 @@ public class CacheService {
     if (useRedis()) {
       try {
         redis.opsForValue().set(k, value, ttl);
+        markUp();
         return;
       } catch (Exception e) {
         markDown();
@@ -91,6 +93,7 @@ public class CacheService {
     if (useRedis()) {
       try {
         redis.delete(k);
+        markUp();
       } catch (Exception e) {
         markDown();
       }
@@ -103,6 +106,7 @@ public class CacheService {
     if (useRedis()) {
       try {
         Long v = redis.opsForValue().increment(k);
+        markUp();
         if (v != null) {
           if (v == 1L) redis.expire(k, ttl);
           return v;
@@ -125,6 +129,7 @@ public class CacheService {
     if (useRedis()) {
       try {
         Long t = redis.getExpire(k);
+        markUp();
         if (t != null && t > 0) return t;
       } catch (Exception e) {
         markDown();
@@ -145,6 +150,26 @@ public class CacheService {
   private void markDown() {
     redisDown = true;
     nextRedisRetryAt = System.currentTimeMillis() + 30_000L;
+  }
+
+  /**
+   * Redis 操作成功 → 复位降级标志。
+   *
+   * <p>以前只有 markDown 没有复位路径，于是这个标志是<b>单向的</b>：
+   * 只要历史上抖动过一次（Redis 重启、网络闪断、一次超时），后台就会
+   * 永远显示「Redis 已降级」，哪怕它早就恢复得很好。
+   *
+   * <p>后果比看上去严重 —— 状态栏天天喊狼来了，真出故障那天就没人信了。
+   * 所以每次操作成功都要把标志拉回来。
+   *
+   * <p>注意只写一次 volatile：先判断再赋值，避免让无故障时的每个缓存操作
+   * 都多做一次 volatile 写。
+   */
+  private void markUp() {
+    if (redisDown) {
+      redisDown = false;
+      nextRedisRetryAt = 0L;
+    }
   }
 
   private void sweep() {

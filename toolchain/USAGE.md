@@ -22,7 +22,7 @@ MySQL 单独安装（约 243MB，若已装官方 MySQL 可跳过）：
 ```powershell
 .\toolchain\setup-mysql.ps1    # 下载 + 解压
 .\toolchain\mysql-start.ps1    # 首次自动初始化数据目录；之后纯启动
-.\toolchain\mysql-init-db.ps1  # 建库 Cyan + 应用账号 yc_app + 灌 schema.sql
+.\toolchain\mysql-init-db.ps1  # 建库 Cyan + 应用账号 Cyan + 灌 schema.sql
 ```
 
 本机用 **3307 端口**，和已装的 MySQL 不冲突；root 初始空密码，第一次进去记得改（`ALTER USER 'root'@'localhost' IDENTIFIED BY '...'`）。

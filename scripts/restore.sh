@@ -20,7 +20,7 @@ $COMPOSE version >/dev/null 2>&1 || COMPOSE="docker-compose"
 
 echo "[restore] 导入数据库: $DB_FILE"
 gunzip -c "$DB_FILE" | $COMPOSE exec -T mysql mysql \
-  -uroot -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DB:-Cyan}"
+  -uroot -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DB:-CyanWorks}"
 
 if [ -n "$MEDIA_FILE" ] && [ -f "$MEDIA_FILE" ]; then
   echo "[restore] 还原素材: $MEDIA_FILE"

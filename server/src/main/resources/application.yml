@@ -16,8 +16,11 @@ spring:
   # ====================== MySQL 8 · 主存储 ======================
   # 正文内容 / 管理员 / 素材元数据 / 审计日志 —— 强持久化，可备份可回滚
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3307}/${MYSQL_DB:Cyan}?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
-    username: ${MYSQL_USER:yc_app}
+    # 默认端口已改为 3306（MySQL 标准端口，也是 docker-compose 与裸机部署实际使用的端口）。
+    # 历史版本这里兜底 3307，导致生产环境一旦漏配 MYSQL_PORT 就连不上库。
+    # 若本地 MySQL 确实跑在 3307，请用环境变量覆盖，不要改回默认值。
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:CyanWorks}?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:Cyan}
     # 不提供任何默认密码：本仓库公开，硬编码凭据会随代码泄露。
     # 必须显式注入 MYSQL_PASSWORD（本地用 .env，生产用环境变量/密钥管理），
     # 缺失时启动即失败并明确报错，避免悄悄连上不可控的实例。
@@ -62,8 +65,11 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: 200MB
-      max-request-size: 220MB
+      # 单文件 600MB；整包略大一点，留给 multipart 边界和多个文件的开销
+      max-file-size: ${SPRING_MULTIPART_MAX_FILE_SIZE:600MB}
+      max-request-size: ${SPRING_MULTIPART_MAX_REQUEST_SIZE:700MB}
+      # 超过 2MB 就落磁盘临时文件而不是堆内存 —— 这条别调大，
+      # 它是 1GB 视频不会把 512MB 的堆撑爆的关键
       file-size-threshold: 2MB
   jackson:
     default-property-inclusion: non_null
@@ -96,12 +102,15 @@ logging:
 
 # ====================== application config ======================
 app:
-  key-prefix: ${APP_KEY_PREFIX:yc:}
+  key-prefix: ${APP_KEY_PREFIX:Cyan:}
   # true = 走 Redis 做内容缓存；false = 完全不用 Redis，只靠 MySQL
   cache-enabled: ${APP_CACHE_ENABLED:true}
   cache-ttl-seconds: ${APP_CACHE_TTL:300}
   # 静态资源根目录（上传的图片/视频）
   upload-dir: ${APP_UPLOAD_DIR:./data/upload}
+  # 视频首帧缓存目录。留空 = 与上传目录平级的 posters 目录
+  # （upload 是 /var/lib/portfolio/upload 时，这里就是 /var/lib/portfolio/posters）
+  poster-dir: ${APP_POSTER_DIR:}
   # 允许上传的 MIME 白名单
   upload-allow-mime:
     - image/jpeg
@@ -110,8 +119,21 @@ app:
     - image/gif
     - video/mp4
     - video/webm
-  # 单文件上限（字节），默认 200MB
-  upload-max-bytes: 209715200
+  # 单文件上限（字节），默认 600MB。
+  # 三处上限必须同步放宽，任何一个卡住都会让大文件上传失败：
+  #   这里(app.upload-max-bytes) / spring.servlet.multipart / nginx client_max_body_size
+  #
+  # 为什么不定到 1GB：这台机器物理内存只有 1.6GB，还要跑 MySQL + Redis + JVM。
+  # 虽然上传路径全程流式不占堆，但仍要留出余量 —— 宁可对极端文件给出一句
+  # 「文件超过上限 600 MB」的明确报错，也不要让整个站点因为内存耗尽而失去响应。
+  # 多文件场景不受此限制：前端会自动切成 ≤90MB 的小批。
+  upload-max-bytes: ${APP_UPLOAD_MAX_BYTES:629145600}
+
+  # 地域解析：离线库 ip2region，只取到「省」，IP 依旧只存哈希。
+  # 关掉或库文件缺失时，地域统计自动降级为「未知」，不影响会话记录。
+  geo:
+    enabled: ${APP_GEO_ENABLED:true}
+    db-path: ${APP_GEO_DB:/opt/portfolio/geo/ip2region.db}
 
   cors:
     # 开发环境允许 Vite 前端；生产改成正式域名，或由 Nginx 反向代理避免跨域

@@ -33,6 +33,24 @@ export interface MediaItem {
    *  native  —— 完全按原始比例，不裁切
    */
   fit?: 'auto' | 'uniform' | 'native'
+  /**
+   * 是否允许播放声音（仅对视频有效）。
+   *
+   * 浏览器一律禁止「带声音的自动播放」——没被用户交互过的页面，
+   * 带音轨的 video.play() 会被直接拒绝。所以即便这里打开，
+   * 首屏仍然是静音自动播放，只是多出一个喇叭按钮，
+   * 访客点一下才真正出声（这一下点击就是浏览器要的用户手势）。
+   * 关掉则连喇叭按钮都不显示，纯静音循环。
+   */
+  sound?: boolean
+  /**
+   * 临时下架（隐藏）。
+   *
+   * 勾选后前台不再渲染这条素材，但文件、标题、画框配置全都留着，
+   * 想重新上架只要取消勾选 —— 不用重新上传、不用重填字段。
+   * 后台素材库里仍然能看到并编辑它。
+   */
+  hidden?: boolean
 }
 
 export interface Action {
@@ -67,12 +85,34 @@ export interface SiteConfig {
   footerNote?: string
   copyright?: string
   footerCols: FooterCol[]
+  /**
+   * 备案信息总开关。关掉后页脚不再显示备案号（号码可以留着不用删）。
+   * 不填这个字段等同于开启。
+   */
+  showBeian?: boolean
+  /**
+   * ICP 备案号，例如「粤ICP备2026xxxxxx号」。
+   * 填了就会在页脚底部渲染一条链到 https://beian.miit.gov.cn/ 的链接。
+   * 国内节点上线必须挂，管局会抽查。
+   */
+  icpBeian?: string
+  /**
+   * 公安备案号，例如「粤公网安备 44010602000123号」。
+   * 链接会自动从号码里抽数字拼到 beian.mps.gov.cn 的查询地址上。
+   */
+  policeBeian?: string
 }
 
 export interface CaseItem {
   title: string
   desc?: string
+  /** 老数据：一个案例只有一条素材 */
   media?: MediaItem
+  /**
+   * 新数据：一个案例可以挂任意多条素材（视频 + 图片混排）。
+   * 前台主展示位播第一条，其余在悬浮缩略轨里点选切换。
+   */
+  mediaList?: MediaItem[]
   specs?: KV[]
   tags?: string[]
 }
@@ -215,6 +255,51 @@ export interface MediaItemView {
   width?: number
   height?: number
   createdAt?: string
+  /** 这条素材身上的标签名。后端一次性算好，前端不用二次请求 */
+  tags?: string[]
+}
+
+/** 一个标签 + 它名下的素材数（用来在筛选按钮上显示「直播截图 12」） */
+export interface MediaTagView {
+  id: number
+  name: string
+  count: number
+}
+
+/**
+ * 打标签的回执。
+ * tags 是**规范化之后**的名字 —— 输入 " #直播 " 存进去是 "直播"，
+ * 回显这一份，界面就能立刻和系统里实际存的保持一致。
+ */
+export interface MediaTagsResult {
+  applied: number
+  missing: string[]
+  tags: string[]
+}
+
+/** 单个素材删除的结果：连同引用一起摘掉后，还剩几处引用被清理了 */
+export interface MediaDeleteResult {
+  deleted: number
+  referencesRemoved: number
+}
+
+/** 批量删除结果：failed 是没删成的路径（通常是已不存在） */
+export interface MediaBatchDeleteResult {
+  deleted: number
+  referencesRemoved: number
+  failed: string[]
+}
+
+/** 批量上传里每个文件的结局：给 url 就是成功，给 error 就是失败 */
+export interface MediaBatchUploadItem {
+  name: string
+  url?: string
+  mime?: string
+  size?: number
+  width?: number
+  height?: number
+  warning?: string
+  error?: string
 }
 
 /* ---------------- 后台监控 ---------------- */
@@ -249,6 +334,10 @@ export interface StatsRecent {
   entryPath?: string
   referrer?: string | null
   ua?: string
+  /** 省/直辖市（2026-10-09 起采集，历史数据为「未知」） */
+  region?: string
+  /** 手机 / 平板 / 桌面 */
+  device?: string
 }
 
 export interface AdminStats {
@@ -257,6 +346,30 @@ export interface AdminStats {
   topPlays: { target: string; count: number }[]
   recent: StatsRecent[]
   inquiry: { total: number; new: number; contacted: number; archived: number }
+  /** 较昨日变化百分比；null = 昨日基数为 0，无法算百分比 */
+  todayDelta?: {
+    visitors?: number | null
+    sessions?: number | null
+    plays?: number | null
+    avgDurationMs?: number | null
+    playRate?: number | null
+  }
+  /** 地域排行（省/直辖市，海外为国家名），最多 10 条 */
+  region?: { name: string; count: number }[]
+  /** 设备占比：手机 / 平板 / 桌面 */
+  devices?: { name: string; count: number }[]
+  /** 浏览器 TOP5 */
+  browsers?: { name: string; count: number }[]
+  /** 来源 TOP5（referrer 域名，无来源为「直接访问」） */
+  sources?: { name: string; count: number }[]
+  /** 时段热力：168 格铺平（周一 0 点起，7 天 × 24 小时） */
+  heatmap?: number[]
+  /** 转化漏斗：窗口内 访问会话 → 播放过作品的会话 → 提交需求（件数） */
+  funnel?: { visits: number; players: number; inquirers: number }
+  /** 统计窗口天数 */
+  windowDays?: number
+  /** 参与聚合的会话数（地域/设备等板块的数据基础） */
+  windowSessions?: number
 }
 
 /* ---------------- 工作对接 ---------------- */

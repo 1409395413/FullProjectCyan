@@ -2,6 +2,9 @@
 .env
 .env.local
 *.env.local
+*.env
+*.pem
+!*.env.example
 server/src/main/resources/application-prod.yml
 
 # ================= Java =================
@@ -22,8 +25,15 @@ web/.vite/
 # ================= build artifacts =================
 # 打包产物是构建输出，不是源码：进仓库会不断膨胀且夹带本机路径/配置
 *.zip
+*.tar.gz
 deploy.zip
+deploy.tar.gz
 portfolio-deploy-package.zip
+
+# ================= migration packages =================
+# 迁移包含全量素材（几百 MB）和整库 dump，是导出产物不是源码。
+# 进仓库会让体积失控，且可能夹带线上真实内容。
+portfolio-migration-*.tar.gz
 
 # ================= data =================
 # 站点内容与素材都在容器卷里，绝不进仓库（重新部署才不会覆盖线上数据）

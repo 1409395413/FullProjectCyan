@@ -23,7 +23,7 @@ echo "[backup] 目标目录: $OUT_DIR"
 # ---------- 1. 数据库（含整站内容 JSON / 账号 / 审计 / 素材元数据）----------
 $COMPOSE exec -T mysql mysqldump \
   --single-transaction --quick --default-character-set=utf8mb4 \
-  -uroot -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DB:-Cyan}" \
+  -uroot -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DB:-CyanWorks}" \
   | gzip > "$OUT_DIR/db-$STAMP.sql.gz"
 echo "[backup] 数据库 -> db-$STAMP.sql.gz"
 

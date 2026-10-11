@@ -101,6 +101,13 @@
             <version>1.17.2</version>
         </dependency>
 
+        <!-- ================= IP -> 地域（离线库，只取到「省」，IP 仍只存哈希） ================= -->
+        <dependency>
+            <groupId>org.lionsoul</groupId>
+            <artifactId>ip2region</artifactId>
+            <version>1.7.2</version>
+        </dependency>
+
         <!-- ================= Ops ================= -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -12,7 +12,10 @@
 [Unit]
 Description=Cyan Studio Portfolio Backend (Spring Boot)
 Documentation=https://github.com/1409395413/Cyan_Iam
-After=network-online.target mysqld.service redis.service
+# Ubuntu 22.04 上服务名是 mysql.service / redis-server.service（不是 mysqld.service / redis.service）。
+# 写错不会报错，但 systemd 会忽略不存在的依赖 —— 后端就可能在数据库就绪前启动，
+# 表现为启动即连不上库、靠 Restart=always 反复重试。这里按 Ubuntu 实际服务名写。
+After=network-online.target mysql.service redis-server.service
 Wants=network-online.target
 
 [Service]
@@ -31,6 +34,11 @@ ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/portfolio/app.jar
 # 崩溃自动拉起
 Restart=always
 RestartSec=10
+
+# 2 GiB 机型保护：限制后端最多吃 1 GiB。
+# 不设的话 JVM 一旦失控膨胀，内核 OOM Killer 可能先把 MySQL 杀掉（整机不可用）；
+# 设了就只杀后端这一个服务，10 秒后自动拉起，数据库不受影响。
+MemoryMax=1024M
 # 优雅停机等待（Spring Boot 默认 shutdown 超时 30s）
 TimeoutStopSec=40
 KillSignal=SIGTERM

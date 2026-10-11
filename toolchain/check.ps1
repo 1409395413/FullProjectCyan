@@ -60,7 +60,7 @@ if (Test-Path $mysqld) {
             # 仓库不内置明文密码；未配置时留空并提示，而不是猜一个默认值
             if ([string]::IsNullOrWhiteSpace($pw)) { $pw = ''; Write-Host '  tables      (skip: MYSQL_PASSWORD 未配置)' -ForegroundColor DarkYellow }
             $env:MYSQL_PWD = $pw
-            $tables = (& $mysqlc -h127.0.0.1 -P3307 -uyc_app -N -e 'SHOW TABLES FROM Cyan' 2>$null)
+            $tables = (& $mysqlc -h127.0.0.1 -P3307 -uCyan -N -e 'SHOW TABLES FROM CyanWorks' 2>$null)
             Write-Host ('  tables      ' + (($tables -join ' ').Trim()))
         }
     } else {

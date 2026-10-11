@@ -253,13 +253,30 @@
 }
 .media-thumb video, .media-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .media-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.media-actions { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
-.media-actions .mini-input { min-height: 38px; }
+/*
+  这一排现在是四个控件（上传 / 素材库 / 外链输入框 / 清空内容）。
+  以前用 grid 三列硬排：第 4 个会掉到第二行，而中间那列是 1fr，
+  会把「从素材库选取」拉得老长、真正该占宽度的 URL 输入框反而被挤成一小条。
+  改成可换行的 flex：按钮各自保持内容宽度，URL 输入框吃掉剩余空间，
+  窄屏时自然折行而不是把某一项压扁。
+*/
+.media-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.media-actions .mini-input { flex: 1 1 220px; min-width: 0; min-height: 38px; }
 .media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .media-grid label { display: flex; flex-direction: column; gap: 4px; }
 .media-grid span { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; }
 .media-grid input, .media-grid select { min-height: 36px; padding: 7px 10px; font-size: 13px; }
 .media-error { font-size: 12px; color: #c0100f; }
+/* 编码不兼容之类的"能传但可能放不出"提醒：用琥珀色，别和真错误混在一起 */
+.media-warn {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #8a5a00;
+  background: #fff6e5;
+  border: 1px solid #f2dca6;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
 
 /* ---------- revisions / inbox / library ---------- */
 .rev-row {
@@ -296,6 +313,45 @@
   white-space: nowrap;
   flex: 1;
 }
+/* 素材库分类：类型角标 + 体积 + 引用计数 */
+.lib-item { position: relative; }
+.lib-item__kind {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-full, 999px);
+  background: rgba(0, 0, 0, .62);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.lib-item__size {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  padding: 2px 8px;
+  border-radius: var(--r-full, 999px);
+  background: rgba(0, 0, 0, .62);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lib-use {
+  padding: 2px 8px;
+  border-radius: var(--r-full, 999px);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lib-use--none {
+  background: rgba(255, 159, 10, .16);
+  color: #a86400;
+}
+.filter-row .push { margin-left: auto; }
 
 .inbox-item {
   padding: 16px 0;
@@ -332,6 +388,67 @@
   box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .inbox-item__ip { margin-top: 8px; }
+
+/* ---------- 工单字段表（与前台表单一一对应） ---------- */
+.inbox-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.inbox-check input { width: 15px; height: 15px; cursor: pointer; }
+.inbox-check span { color: var(--ink-3); }
+
+.inbox-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 10px 0 2px;
+}
+.inbox-f {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed rgba(0, 0, 0, .06);
+}
+.inbox-f dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.inbox-f dd {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.inbox-f--full { grid-column: 1 / -1; }
+.inbox-f__msg { white-space: pre-wrap; line-height: 1.62; }
+
+.inbox-pickall {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  padding-left: 12px;
+}
+.inbox-pickall__all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.inbox-pickall__all input { width: 15px; height: 15px; cursor: pointer; }
+
+@media (max-width: 720px) {
+  .inbox-fields { grid-template-columns: 1fr; }
+  .inbox-pickall { margin-left: 0; padding-left: 0; }
+}
 
 /* ---------- 监控板块 ---------- */
 .sec-head {
@@ -390,6 +507,18 @@
 }
 .stat-card span { font-size: 13px; font-weight: 600; color: var(--ink); }
 .stat-card i { font-style: normal; font-size: 11.5px; color: var(--ink-3); }
+/* 「较昨日 ↑↓ x%」环比小标 —— 中国习惯：涨红跌绿 */
+.stat-card em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.stat-card em.is-up { color: #c0392b; background: rgba(192, 57, 43, .1); }
+.stat-card em.is-down { color: #1e8449; background: rgba(30, 132, 73, .1); }
+.stat-card em.is-flat { color: var(--ink-3); background: rgba(127, 127, 127, .1); }
 
 .bars { display: flex; align-items: flex-end; gap: 8px; height: 150px; padding-top: 6px; }
 .bars__col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
@@ -449,6 +578,79 @@
 }
 .tag--ghost { background: rgba(0, 0, 0, .06); color: var(--ink-2); }
 .tag--status { background: rgba(52, 199, 89, .16); color: #0a7d33; }
+
+/* ---------- 素材标签：筛选按钮 / 素材卡片上的标签牌 ----------
+   颜色一律用 --ink / --accent 这类会随主题翻转的变量，
+   所以不需要再在下面三处暗色块里各抄一份（那三块是 gen-theme-css.js 生成的） */
+.tag-row {
+  display: flex;
+  align-items: center;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 2px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, .07);
+}
+.tag-row__lab {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid rgba(0, 0, 0, .1);
+  border-radius: var(--r-full);
+  background: rgba(0, 0, 0, .05);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .2s var(--ease), color .2s var(--ease);
+}
+.tag-chip:hover { background: rgba(0, 0, 0, .1); color: var(--ink); }
+.tag-chip i {
+  font-style: normal;
+  font-size: 11px;
+  opacity: .55;
+  font-variant-numeric: tabular-nums;
+}
+.tag-chip b {
+  cursor: pointer;
+  opacity: .5;
+  font-weight: 700;
+}
+.tag-chip b:hover { opacity: 1; color: #c0100f; }
+.tag-chip--on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+.tag-chip--on:hover { background: var(--accent-soft); color: var(--accent); }
+/* 素材卡片左上角/右下角叠标签：不占额外版面，浮在缩略图上 */
+.lib-item__tags {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: calc(100% - 12px);
+}
+.lib-item__tags span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .66);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+}
 
 .status-box {
   margin-top: 28px;
@@ -544,9 +746,141 @@
     color: #f5f5f7;
   }
   .play-row, .visit-row { border-color: rgba(255, 255, 255, .1); }
+  .inbox-f { border-bottom-color: rgba(255, 255, 255, .1); }
+  .inbox-f dd { color: #f5f5f7; }
+  .inbox-pickall__all { color: var(--ink-2); }
   .tag { background: rgba(41, 151, 255, .2); color: #6cb8ff; }
   .tag--ghost { background: rgba(255, 255, 255, .1); color: var(--ink-2); }
   .tag--status { background: rgba(52, 199, 89, .2); color: #6ee79b; }
   .filter-row .mini.on { background: #f5f5f7; color: #1d1d1f; }
   .inbox-item.is-new { border-left-color: var(--accent); }
 }
+
+/* ---- 昼夜手动切换：以下两块由 gen-theme-css.js 从上方系统暗色块生成 ----
+   第一块：没手动选过才跟随系统；第二块：手动选了夜间就强制生效。
+   改动上方暗色样式后请重新生成本块，否则手动切换会漏掉新样式。 ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mini,
+  :root:not([data-theme="light"]) .f input:not([type='checkbox']),
+  :root:not([data-theme="light"]) .f select,
+  :root:not([data-theme="light"]) .f textarea,
+  :root:not([data-theme="light"]) .mini-input,
+  :root:not([data-theme="light"]) .mod-list__head select {
+    background: rgba(255, 255, 255, .08);
+    border-color: rgba(255, 255, 255, .14);
+    color: #f5f5f7;
+  }
+  :root:not([data-theme="light"]) .mini:hover { background: rgba(255, 255, 255, .14); }
+  :root:not([data-theme="light"]) .f input:not([type='checkbox']):focus,
+  :root:not([data-theme="light"]) .f select:focus,
+  :root:not([data-theme="light"]) .f textarea:focus,
+  :root:not([data-theme="light"]) .mini-input:focus {
+    background: var(--field-bg-focus);
+    border-color: var(--accent);
+  }
+  :root:not([data-theme="light"]) .admin-tabs button:hover { background: rgba(255, 255, 255, .1); }
+  :root:not([data-theme="light"]) .admin-tabs button.on { background: #f5f5f7; color: #1d1d1f; }
+  :root:not([data-theme="light"]) .mod-item:hover { background: rgba(255, 255, 255, .06); }
+  :root:not([data-theme="light"]) .badge { background: rgba(255, 255, 255, .1); color: var(--ink-2); }
+  :root:not([data-theme="light"]) .badge.up { background: rgba(52, 199, 89, .2); color: #6ee79b; }
+  :root:not([data-theme="light"]) .badge.down { background: rgba(255, 159, 10, .2); color: #ffcf70; }
+  :root:not([data-theme="light"]) .kv-row,
+  :root:not([data-theme="light"]) .media-row,
+  :root:not([data-theme="light"]) .list-item,
+  :root:not([data-theme="light"]) .lib-item { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .1); }
+  :root:not([data-theme="light"]) .rev-row,
+  :root:not([data-theme="light"]) .inbox-item { border-color: rgba(255, 255, 255, .1); }
+  :root:not([data-theme="light"]) .notice.ok { background: rgba(52, 199, 89, .2); color: #7ce49f; }
+  :root:not([data-theme="light"]) .notice.err { background: rgba(255, 59, 48, .2); color: #ff8079; }
+  :root:not([data-theme="light"]) .media-grid span,
+  :root:not([data-theme="light"]) .f > span,
+  :root:not([data-theme="light"]) .f-head > span { color: var(--ink-3); }
+  :root:not([data-theme="light"]) .stat-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .04));
+    border-color: rgba(255, 255, 255, .12);
+  }
+  :root:not([data-theme="light"]) .stat-card b { color: #f5f5f7; }
+  :root:not([data-theme="light"]) .stat-card span { color: #f5f5f7; }
+  :root:not([data-theme="light"]) .sec-head select,
+  :root:not([data-theme="light"]) .inbox-item__foot .note-input {
+    background: rgba(255, 255, 255, .08);
+    border-color: rgba(255, 255, 255, .14);
+    color: #f5f5f7;
+  }
+  :root:not([data-theme="light"]) .play-row,
+  :root:not([data-theme="light"]) .visit-row { border-color: rgba(255, 255, 255, .1); }
+  :root:not([data-theme="light"]) .inbox-f { border-bottom-color: rgba(255, 255, 255, .1); }
+  :root:not([data-theme="light"]) .inbox-f dd { color: #f5f5f7; }
+  :root:not([data-theme="light"]) .inbox-pickall__all { color: var(--ink-2); }
+  :root:not([data-theme="light"]) .tag { background: rgba(41, 151, 255, .2); color: #6cb8ff; }
+  :root:not([data-theme="light"]) .tag--ghost { background: rgba(255, 255, 255, .1); color: var(--ink-2); }
+  :root:not([data-theme="light"]) .tag--status { background: rgba(52, 199, 89, .2); color: #6ee79b; }
+  :root:not([data-theme="light"]) .filter-row .mini.on { background: #f5f5f7; color: #1d1d1f; }
+  :root:not([data-theme="light"]) .inbox-item.is-new { border-left-color: var(--accent); }
+}
+  :root[data-theme="dark"] .mini,
+  :root[data-theme="dark"] .f input:not([type='checkbox']),
+  :root[data-theme="dark"] .f select,
+  :root[data-theme="dark"] .f textarea,
+  :root[data-theme="dark"] .mini-input,
+  :root[data-theme="dark"] .mod-list__head select {
+    background: rgba(255, 255, 255, .08);
+    border-color: rgba(255, 255, 255, .14);
+    color: #f5f5f7;
+  }
+  :root[data-theme="dark"] .mini:hover { background: rgba(255, 255, 255, .14); }
+  :root[data-theme="dark"] .f input:not([type='checkbox']):focus,
+  :root[data-theme="dark"] .f select:focus,
+  :root[data-theme="dark"] .f textarea:focus,
+  :root[data-theme="dark"] .mini-input:focus {
+    background: var(--field-bg-focus);
+    border-color: var(--accent);
+  }
+  :root[data-theme="dark"] .admin-tabs button:hover { background: rgba(255, 255, 255, .1); }
+  :root[data-theme="dark"] .admin-tabs button.on { background: #f5f5f7; color: #1d1d1f; }
+  :root[data-theme="dark"] .mod-item:hover { background: rgba(255, 255, 255, .06); }
+  :root[data-theme="dark"] .badge { background: rgba(255, 255, 255, .1); color: var(--ink-2); }
+  :root[data-theme="dark"] .badge.up { background: rgba(52, 199, 89, .2); color: #6ee79b; }
+  :root[data-theme="dark"] .badge.down { background: rgba(255, 159, 10, .2); color: #ffcf70; }
+  :root[data-theme="dark"] .kv-row,
+  :root[data-theme="dark"] .media-row,
+  :root[data-theme="dark"] .list-item,
+  :root[data-theme="dark"] .lib-item { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .1); }
+  :root[data-theme="dark"] .rev-row,
+  :root[data-theme="dark"] .inbox-item { border-color: rgba(255, 255, 255, .1); }
+  :root[data-theme="dark"] .notice.ok { background: rgba(52, 199, 89, .2); color: #7ce49f; }
+  :root[data-theme="dark"] .notice.err { background: rgba(255, 59, 48, .2); color: #ff8079; }
+  :root[data-theme="dark"] .media-grid span,
+  :root[data-theme="dark"] .f > span,
+  :root[data-theme="dark"] .f-head > span { color: var(--ink-3); }
+  :root[data-theme="dark"] .stat-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .04));
+    border-color: rgba(255, 255, 255, .12);
+  }
+  :root[data-theme="dark"] .stat-card b { color: #f5f5f7; }
+  :root[data-theme="dark"] .stat-card span { color: #f5f5f7; }
+  :root[data-theme="dark"] .sec-head select,
+  :root[data-theme="dark"] .inbox-item__foot .note-input {
+    background: rgba(255, 255, 255, .08);
+    border-color: rgba(255, 255, 255, .14);
+    color: #f5f5f7;
+  }
+  :root[data-theme="dark"] .play-row,
+  :root[data-theme="dark"] .visit-row { border-color: rgba(255, 255, 255, .1); }
+  :root[data-theme="dark"] .inbox-f { border-bottom-color: rgba(255, 255, 255, .1); }
+  :root[data-theme="dark"] .inbox-f dd { color: #f5f5f7; }
+  :root[data-theme="dark"] .inbox-pickall__all { color: var(--ink-2); }
+  :root[data-theme="dark"] .tag { background: rgba(41, 151, 255, .2); color: #6cb8ff; }
+  :root[data-theme="dark"] .tag--ghost { background: rgba(255, 255, 255, .1); color: var(--ink-2); }
+  :root[data-theme="dark"] .tag--status { background: rgba(52, 199, 89, .2); color: #6ee79b; }
+  :root[data-theme="dark"] .filter-row .mini.on { background: #f5f5f7; color: #1d1d1f; }
+  :root[data-theme="dark"] .inbox-item.is-new { border-left-color: var(--accent); }
+
+/* 批量删除的「待确认」态：再点一次就真删了，得让人一眼看出来 */
+.mini.danger.is-armed {
+  background: rgba(255, 59, 48, .16);
+  border-color: rgba(255, 59, 48, .5);
+  color: #c0100f;
+  font-weight: 700;
+}
+

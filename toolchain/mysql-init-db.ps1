@@ -32,8 +32,8 @@ if ([string]::IsNullOrWhiteSpace($dbName))   { $dbName   = 'Cyan' }
 
 $sql = @"
 CREATE DATABASE IF NOT EXISTS $dbName CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER IF NOT EXISTS 'yc_app'@'%' IDENTIFIED BY '$appPass';
-GRANT SELECT,INSERT,UPDATE,DELETE ON $dbName.* TO 'yc_app'@'%';
+CREATE USER IF NOT EXISTS 'Cyan'@'%' IDENTIFIED BY '$appPass';
+GRANT SELECT,INSERT,UPDATE,DELETE ON $dbName.* TO 'Cyan'@'%';
 FLUSH PRIVILEGES;
 "@
 $sqlTmp = Join-Path $Root '_init.sql'
@@ -45,7 +45,7 @@ Get-Content $sqlTmp | & $mysql -h127.0.0.1 -P3307 -uroot "-p$rootPass" 2>&1 | Ou
 $schema = Join-Path $Repo 'server\src\main\resources\db\schema.sql'
 if (Test-Path $schema) {
     Write-Host '[mysql] applying schema.sql ...'
-    Get-Content $schema | & $mysql -h127.0.0.1 -P3307 -uyc_app "-p$appPass" $dbName 2>&1 | Out-Null
+    Get-Content $schema | & $mysql -h127.0.0.1 -P3307 -uCyan "-p$appPass" $dbName 2>&1 | Out-Null
 } else {
     Write-Host ('[mysql] schema not found: ' + $schema) -ForegroundColor Yellow
 }
@@ -53,7 +53,7 @@ if (Test-Path $schema) {
 Remove-Item $sqlTmp -Force -ErrorAction SilentlyContinue
 Write-Host ''
 Write-Host ('[mysql] database : ' + $dbName)
-Write-Host ('[mysql] connect  : mysql -h127.0.0.1 -P3307 -uyc_app -p**** ' + $dbName)
+Write-Host ('[mysql] connect  : mysql -h127.0.0.1 -P3307 -uCyan -p**** ' + $dbName)
 Write-Host ('[mysql] jdbc     : jdbc:mysql://127.0.0.1:3307/' + $dbName)
 Write-Host ''
 Write-Host 'Security reminder: also set the root password once:' -ForegroundColor Yellow

@@ -1,8 +1,12 @@
 # Cyan · Studio 个人作品集站点
 
+> 📚 **完整文档在 [`docs/`](./docs/README.md)**：  
+> 架构全景 · 部署 SOP · 运维排查 · 上线验收与合规。  
+> 第一次接手或要重装服务器，请从 `docs/01` 顺着读。
+
 摄影 / 剪辑 / 直播搭建 / AI 视频四大板块 + 个人简介。
 
-**Vue 3 + TypeScript 前台 · Java 17 / Spring Boot 3 后端 · MySQL 8 主存储 · Redis 7 缓存 · Nginx 发布**。
+**Vue 3 + TypeScript 前台 · Java 17 / Spring Boot 3 后端 · MySQL 8 主存储 · Redis 7 缓存 · Nginx 发布**。  
 站点所有文案、模块、图片视频都在后台可视化维护，**改内容不需要重新部署**。
 
 ---
@@ -11,12 +15,12 @@
 
 这是整个项目最重要的一条原则，也是"推 GitHub 部署"能成立的前提：
 
-| 东西 | 放在哪 | 会不会被重新部署覆盖 |
-|---|---|---|
-| 代码（页面、样式、后端逻辑） | GitHub 仓库 | 会 —— 这是你期望的 |
-| 站点内容（文案 / 模块 / 顺序） | MySQL `site_content.payload`（一行 JSON） | **不会** |
-| 图片 / 视频素材 | Docker 卷 `upload-data` | **不会** |
-| 管理员账号 | MySQL `admin_user`（BCrypt 存储） | **不会** |
+| 东西                 | 放在哪                                   | 会不会被重新部署覆盖  |
+| ------------------ | ------------------------------------- | ----------- |
+| 代码（页面、样式、后端逻辑）     | GitHub 仓库                             | 会 —— 这是你期望的 |
+| 站点内容（文案 / 模块 / 顺序） | MySQL `site_content.payload`（一行 JSON） | **不会**      |
+| 图片 / 视频素材          | Docker 卷 `upload-data`                | **不会**      |
+| 管理员账号              | MySQL `admin_user`（BCrypt 存储）         | **不会**      |
 
 带来的好处：
 
@@ -71,12 +75,12 @@ git push -u origin main
 
 **方式 B · 网页拖拽上传（不想用命令行时）**
 
-仓库根目录下已经放好了 `portfolio-deploy-package.zip`（已排除 `.env`、`node_modules`、构建产物）。
-在 GitHub 新建仓库页点 **uploading an existing file**，把压缩包里的文件**整个拖进去**即可。
+仓库根目录下已经放好了 `portfolio-deploy-package.zip`（已排除 `.env`、`node_modules`、构建产物）。  
+在 GitHub 新建仓库页点 **uploading an existing file**，把压缩包里的文件**整个拖进去**即可。  
 注意别连 `.env` 一起传——里面是数据库密码和 JWT 密钥。
 
-> 推送前自查一遍，下面这些**不应该**出现在仓库里：
-> `.env`、`data/`、`.toolchain/`、`web/dist/`、`server/target/`、`node_modules/`、`*.log`
+> 推送前自查一遍，下面这些**不应该**出现在仓库里：  
+> `.env`、`data/`、`.toolchain/`、`web/dist/`、`server/target/`、`node_modules/`、`*.log`  
 > 它们都已在 `.gitignore` 中。`.env` 尤其重要 —— 里面有数据库密码和 JWT 密钥。
 
 ### 2. 服务器上克隆
@@ -99,14 +103,14 @@ cp .env.example .env
 openssl rand -base64 64
 ```
 
-| 变量 | 说明 |
-|---|---|
-| `JWT_SECRET` | ≥32 字节随机串。**改它会使所有已登录会话失效**，所以只在上線前设一次 |
-| `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | 数据库密码，两个都要换 |
-| `REDIS_PASSWORD` | Redis 密码 |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | **仅首次启动**用于播种管理员 |
-| `APP_CORS_ORIGINS` | 填正式域名，如 `https://www.yourdomain.com`。走 Nginx 同源反代时不跨域，可留默认 |
-| `HTTP_PORT` | 对外端口，默认 80 |
+| 变量                                       | 说明                                                         |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `JWT_SECRET`                             | ≥32 字节随机串。**改它会使所有已登录会话失效**，所以只在上線前设一次                     |
+| `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | 数据库密码，两个都要换                                                |
+| `REDIS_PASSWORD`                         | Redis 密码                                                   |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD`      | **仅首次启动**用于播种管理员                                           |
+| `APP_CORS_ORIGINS`                       | 填正式域名，如 `https://www.yourdomain.com`。走 Nginx 同源反代时不跨域，可留默认 |
+| `HTTP_PORT`                              | 对外端口，默认 80                                                 |
 
 > `.env` 不支持行尾注释（`# 注释` 会被当成值的一部分），改的时候注意。
 
@@ -150,23 +154,23 @@ www.yourdomain.com {
 }
 ```
 
-把 `.env` 里 `HTTP_PORT=8081`（只对内网监听），然后 `caddy run`。
+把 `.env` 里 `HTTP_PORT=8081`（只对内网监听），然后 `caddy run`。  
 想用 Nginx 终结 TLS 的话看 `deploy/nginx-tls.conf.example`。
 
 ### 9. 换服务器也不会踩坑的路径清单
 
-代码里**没有任何**绑死本机环境的路径（没有盘符、没有用户目录、没有仓库绝对地址）。
+代码里**没有任何**绑死本机环境的路径（没有盘符、没有用户目录、没有仓库绝对地址）。  
 只有下面这几处需要你按目标机器确认一遍：
 
-| 位置 | 值 | 说明 |
-|---|---|---|
-| `.env` → `APP_UPLOAD_DIR` | `/var/lib/portfolio/upload` | **必须是绝对路径**。相对路径会跟着 java 进程的工作目录解析，换启动方式素材就"消失"。配成相对路径时后端启动会打 WARN 并打印解析后的真实位置 |
-| `docker-compose.yml`（api） | `APP_UPLOAD_DIR: /var/lib/portfolio/upload` | 容器内路径，与 `Dockerfile` 里 `mkdir`/`chown` 的一致 |
-| `docker-compose.yml`（web） | `upload-data:/var/www/media:ro` | 同一个卷的只读副本，Nginx 从这里直出图片/视频 |
-| `docker-compose.yml` | `name: portfolio` | 固定项目名 → 卷名恒为 `portfolio_xxx`，备份脚本不用猜目录名 |
-| `deploy/redis.conf` | 无 `requirepass` | 密码由 compose 用 `--requirepass ${REDIS_PASSWORD}` 注入，只认 `.env` 一份 |
-| 前端 `VITE_BASE` | 默认 `/` | 部署在子目录（如 `/portfolio/`）时设成 `/portfolio/`，前端路由已用 `BASE_URL`，改这一处就够 |
-| `HTTP_PORT` | 默认 `80` | 对外只暴露这一个端口 |
+| 位置                        | 值                                           | 说明                                                                             |
+| ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| `.env` → `APP_UPLOAD_DIR` | `/var/lib/portfolio/upload`                 | **必须是绝对路径**。相对路径会跟着 java 进程的工作目录解析，换启动方式素材就"消失"。配成相对路径时后端启动会打 WARN 并打印解析后的真实位置 |
+| `docker-compose.yml`（api） | `APP_UPLOAD_DIR: /var/lib/portfolio/upload` | 容器内路径，与 `Dockerfile` 里 `mkdir`/`chown` 的一致                                     |
+| `docker-compose.yml`（web） | `upload-data:/var/www/media:ro`             | 同一个卷的只读副本，Nginx 从这里直出图片/视频                                                     |
+| `docker-compose.yml`      | `name: portfolio`                           | 固定项目名 → 卷名恒为 `portfolio_xxx`，备份脚本不用猜目录名                                        |
+| `deploy/redis.conf`       | 无 `requirepass`                             | 密码由 compose 用 `--requirepass ${REDIS_PASSWORD}` 注入，只认 `.env` 一份                |
+| 前端 `VITE_BASE`            | 默认 `/`                                      | 部署在子目录（如 `/portfolio/`）时设成 `/portfolio/`，前端路由已用 `BASE_URL`，改这一处就够              |
+| `HTTP_PORT`               | 默认 `80`                                     | 对外只暴露这一个端口                                                                     |
 
 **已经替你踩掉的三个坑**（不改的话在服务器上是真的起不来）：
 
@@ -182,7 +186,7 @@ www.yourdomain.com {
 0 3 * * * cd /opt/portfolio && ./scripts/backup.sh >> /var/log/pf-backup.log 2>&1
 ```
 
-产出两份：`db-时间戳.sql.gz`（整站内容/账号/审计）+ `media-时间戳.tar.gz`（图片视频），默认保留最近 14 份。
+产出两份：`db-时间戳.sql.gz`（整站内容/账号/审计）+ `media-时间戳.tar.gz`（图片视频），默认保留最近 14 份。  
 恢复：`./scripts/restore.sh backup/db-xxx.sql.gz backup/media-xxx.tar.gz`。
 
 ---
@@ -268,12 +272,12 @@ cd web    && npm install && npm run dev  # http://localhost:5173
 
 ### 监控（今日访客 / 停留时长 / 是否播放作品）
 
-前台 `HomeView` 启动时开一次匿名会话，之后每 20 秒报一次心跳累加停留时长，
+前台 `HomeView` 启动时开一次匿名会话，之后每 20 秒报一次心跳累加停留时长，  
 关标签页时用 `navigator.sendBeacon` 补最后一拍；点开任意作品记一次 `play`。
 
 - 后端只存 **IP 的哈希**，不采集姓名、账号、精确定位，也不做跨天追踪；
 - 三张表：`visit_session`（会话 / 停留 / 播放数）、`visit_event`（动作明细）；
-- 后台「监控」页给出：今日访客数、平均停留、播放次数与播放率、近 7/14/30 天柱状趋势、
+- 后台「监控」页给出：今日访客数、平均停留、播放次数与播放率、近 7/14/30 天柱状趋势、  
   被点播最多的作品 TOP10、最近 20 次访问明细。
 
 ### 工作对接（网站底部提交的需求）
@@ -298,15 +302,15 @@ cd web    && npm install && npm run dev  # http://localhost:5173
 
 摄影、剪辑、直播这行必然横屏 16:9 与竖屏 9:16 混着来，规则只有一条：
 
-| 状态 | 行为 |
-|---|---|
+| 状态        | 行为                                    |
+| --------- | ------------------------------------- |
 | **卡牌收拢态** | 所有牌共用 4:5 统一画框，一排牌视觉重量一致，不会因一张竖图把行高撑乱 |
-| **点开播放态** | 按素材**真实比例**展开：竖屏变高、横屏变宽，尺寸真的会变（弹簧缓动） |
-| **其他模块** | 按真实方向选画框，竖屏 4:5 / 横屏 16:9 / 方图 1:1 |
+| **点开播放态** | 按素材**真实比例**展开：竖屏变高、横屏变宽，尺寸真的会变（弹簧缓动）  |
+| **其他模块**  | 按真实方向选画框，竖屏 4:5 / 横屏 16:9 / 方图 1:1    |
 
-尺寸从哪来：上传或粘贴外链后**前端当场探测**真实像素并回填 `w/h`
-（图片用 `naturalWidth`，视频用 `loadedmetadata`），下次保存就固化进数据库。
-后台每张素材都会显示「1080×1920 · 竖屏」，并可手工指定画框策略
+尺寸从哪来：上传或粘贴外链后**前端当场探测**真实像素并回填 `w/h`  
+（图片用 `naturalWidth`，视频用 `loadedmetadata`），下次保存就固化进数据库。  
+后台每张素材都会显示「1080×1920 · 竖屏」，并可手工指定画框策略  
 （自动 / 统一画框 / 原始比例）。
 
 ## 十、安全清单
@@ -344,29 +348,31 @@ cd web    && npm install && npm run dev  # http://localhost:5173
 
 ## 十一、接口一览
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|---|---|---|---|
-| GET | `/api/content` | 公开 | 整份站点 JSON |
-| PUT | `/api/content` | 需登录 | 保存（自动校验 + 存快照 + 版本号 +1） |
-| GET | `/api/content/revisions` | 需登录 | 最近 20 份快照 |
-| POST | `/api/content/rollback?id=` | 需登录 | 回滚 |
-| POST | `/api/media` | 需登录 | 上传，返回 `{url, mime, size}` |
-| GET | `/api/media` | 需登录 | 素材库 |
-| DELETE | `/api/media?path=` | 需登录 | 删除 |
-| POST | `/api/auth/login` | 公开 | 登录 |
-| POST | `/api/auth/logout` | 需登录 | 登出（拉黑 token） |
-| GET | `/api/auth/me` | 需登录 | 当前用户 |
-| POST | `/api/auth/password` | 需登录 | 改密码 |
-| GET | `/api/admin/status` | 需登录 | Redis 状态 / 内容版本 / 素材数 |
-| GET | `/api/admin/inbox` | 需登录 | 访客留言 |
-| POST | `/api/inquiry` | 公开 | 提交项目需求 |
-| GET | `/api/admin/inquiries` | 需登录 | 需求列表 |
-| PATCH | `/api/admin/inquiries/{id}` | 需登录 | 改状态（new/contacted/archived）与内部备注 |
-| DELETE | `/api/admin/inquiries/{id}` | 需登录 | 删除需求 |
-| GET | `/api/admin/stats?days=7` | 需登录 | 访客 / 停留 / 播放 / 趋势 / 播放榜 |
-| POST | `/api/track/session` | 公开 | 开匿名会话，返回 sessionId |
-| POST | `/api/track/beat` | 公开 | 心跳，累加停留时长 |
-| POST | `/api/track/event` | 公开 | 记动作（play / inquiry） |
+| 方法     | 路径                          | 鉴权  | 说明                               |
+| ------ | --------------------------- | --- | -------------------------------- |
+| GET    | `/api/content`              | 公开  | 整份站点 JSON                        |
+| PUT    | `/api/content`              | 需登录 | 保存（自动校验 + 存快照 + 版本号 +1）          |
+| GET    | `/api/content/revisions`    | 需登录 | 最近 20 份快照                        |
+| POST   | `/api/content/rollback?id=` | 需登录 | 回滚                               |
+| POST   | `/api/media`                | 需登录 | 上传，返回 `{url, mime, size}`        |
+| GET    | `/api/media`                | 需登录 | 素材库                              |
+| DELETE | `/api/media?path=`          | 需登录 | 删除                               |
+| POST   | `/api/auth/login`           | 公开  | 登录                               |
+| POST   | `/api/auth/logout`          | 需登录 | 登出（拉黑 token）                     |
+| GET    | `/api/auth/me`              | 需登录 | 当前用户                             |
+| POST   | `/api/auth/password`        | 需登录 | 改密码                              |
+| GET    | `/api/admin/status`         | 需登录 | Redis 状态 / 内容版本 / 素材数            |
+| GET    | `/api/admin/inbox`          | 需登录 | 访客留言                             |
+| POST   | `/api/inquiry`              | 公开  | 提交项目需求                           |
+| GET    | `/api/admin/inquiries`      | 需登录 | 需求列表                             |
+| PATCH  | `/api/admin/inquiries/{id}` | 需登录 | 改状态（new/contacted/archived）与内部备注 |
+| DELETE | `/api/admin/inquiries/{id}` | 需登录 | 删除需求                             |
+| GET    | `/api/admin/stats?days=7`   | 需登录 | 访客 / 停留 / 播放 / 趋势 / 播放榜          |
+| POST   | `/api/track/session`        | 公开  | 开匿名会话，返回 sessionId               |
+| POST   | `/api/track/beat`           | 公开  | 心跳，累加停留时长                        |
+| POST   | `/api/track/event`          | 公开  | 记动作（play / inquiry）              |
+
+
 | GET | `/media/<相对路径>` | 公开 | 素材（生产由 Nginx 直出） |
 
 ---

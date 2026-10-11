@@ -1,9 +1,9 @@
 ﻿<#
 .SYNOPSIS
-    Cyan · Studio —— 一键部署打包脚本（在 Windows 本地执行，产出 deploy.zip）
+    Cyan · Studio —— 一键部署打包脚本（在 Windows 本地执行，产出 deploy.tar.gz）
 
 .DESCRIPTION
-    自动检测技术栈 -> 构建前端/后端 -> 只收集服务器运行必需的文件 -> 排除敏感文件 -> 生成 deploy.zip
+    自动检测技术栈 -> 构建前端/后端 -> 只收集服务器运行必需的文件 -> 排除敏感文件 -> 生成 deploy.tar.gz
 
     产出 zip 的内部结构已对齐 deploy/nginx.conf 与 deploy/portfolio.service 中的路径约定：
         app.jar                        -> /opt/portfolio/app.jar        (systemd ExecStart)
@@ -12,7 +12,7 @@
         deploy/nginx.conf              -> /etc/nginx/conf.d/portfolio.conf
         deploy/portfolio.service       -> /etc/systemd/system/portfolio.service
         db/schema.sql                  -> 数据库初始化脚本
-        config/application.yml         -> 参考配置（真正的配置在 jar 内）
+        config/application.yml.example -> 参考配置（真正的配置在 jar 内；加 .example 是为了不被 Spring 加载）
 
 .PARAMETER SkipFrontend
     跳过前端构建（复用已有的 web/dist）
@@ -24,7 +24,7 @@
     保留中间暂存目录 _deploy_stage，便于排查
 
 .PARAMETER OutFile
-    输出的 zip 文件名，默认 deploy.zip
+    输出的包名，默认 deploy.tar.gz
 
 .EXAMPLE
     .\pack-deploy.ps1
@@ -34,7 +34,7 @@ param(
     [switch]$SkipFrontend,
     [switch]$SkipBackend,
     [switch]$KeepStage,
-    [string]$OutFile = 'deploy.zip'
+    [string]$OutFile = 'deploy.tar.gz'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,6 +45,41 @@ function Step { param([string]$m) Write-Host "`n=== $m ===" -ForegroundColor Cya
 function Ok   { param([string]$m) Write-Host "  [OK]  $m" -ForegroundColor Green }
 function Warn { param([string]$m) Write-Host "  [!!]  $m" -ForegroundColor Yellow }
 function Fail { param([string]$m) Write-Host "  [XX]  $m" -ForegroundColor Red }
+
+<#
+  写 UTF-8 无 BOM 文件。
+  坑：Windows PowerShell 5.1 的 Set-Content -Encoding UTF8 会写入 BOM，
+      生成的 .sh 拿到 Linux 上，shebang 行首多了三个字节就认不出 bash，
+      表现为 "bash: ./setup-ubuntu.sh: cannot execute: required file not found"。
+      这里改用 .NET 显式指定无 BOM，并顺手把 CRLF 归一成 LF。
+#>
+function Write-Utf8NoBom {
+    param([string]$Path, [string]$Value)
+    $dir = Split-Path -Parent $Path
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $normalized = $Value -replace "`r`n", "`n"
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $normalized, $enc)
+}
+
+<#
+  删除「本次打包自己生成的产物」：deploy.tar.gz 与 _deploy_stage 暂存目录。
+  坑：这两个路径如果用 Remove-Item 删，会被本机的回收站式安全删除拦截
+      （大文件走 trash 操作失败，报 SAFE_DELETE_FAIL_CLOSED / trash-failed），
+      抛异常直接中断打包——结果就是旧的 deploy.tar.gz 还在、新的没生成。
+  它们不是用户文件，而是脚本每次都重建的构建输出，所以这里用 .NET 直接删，
+  不走回收站。
+#>
+function Remove-BuildArtifact {
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path $Path)) { return }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item -is [System.IO.DirectoryInfo]) {
+        [System.IO.Directory]::Delete($item.FullName, $true)
+    } else {
+        [System.IO.File]::Delete($item.FullName)
+    }
+}
 
 <#
   执行原生命令（node / npm / mvn）。
@@ -203,7 +238,7 @@ if ($hasBackend) {
 Step '5/6 组装待打包内容（白名单收集，天然排除 node_modules/.git/日志/缓存/测试）'
 
 $stage = Join-Path $Root '_deploy_stage'
-if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+Remove-BuildArtifact $stage
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 foreach ($d in @('web', 'deploy', 'db', 'config', 'scripts')) {
     New-Item -ItemType Directory -Path (Join-Path $stage $d) -Force | Out-Null
@@ -233,15 +268,23 @@ Copy-In (Join-Path $Root 'web\dist') 'web' '前端静态产物'
 Copy-In (Join-Path $Root 'deploy\nginx.conf')                  'deploy\nginx.conf'                  'Nginx 站点配置'
 Copy-In (Join-Path $Root 'deploy\nginx-tls.conf.example')      'deploy\nginx-tls.conf.example'      'HTTPS 配置模板'
 Copy-In (Join-Path $Root 'deploy\portfolio.service')           'deploy\portfolio.service'           'systemd 单元'
-Copy-In (Join-Path $Root 'deploy\redis.conf')                  'deploy\redis.conf'                  'Redis 配置'
+Copy-In (Join-Path $Root 'deploy\redis.conf')                  'deploy\redis.conf'                  'Redis 配置（Docker 版）'
+Copy-In (Join-Path $Root 'deploy\redis-ubuntu.conf')           'deploy\redis-ubuntu.conf'           'Redis 配置（裸机 Ubuntu 专用）'
+Copy-In (Join-Path $Root 'deploy\nginx-ubuntu-tls.conf')       'deploy\nginx-ubuntu-tls.conf'       'HTTPS 配置（裸机专用）'
 Copy-In (Join-Path $Root 'deploy\env.production.example')      'deploy\env.production.example'      '环境变量模板（不含真实密钥）'
 
 # --- 数据库迁移 / 初始化 ---
 Copy-In (Join-Path $Root 'server\src\main\resources\db\schema.sql') 'db\schema.sql' '数据库建表脚本'
 
 # --- 运行时配置参考 & 种子内容 ---
-Copy-In (Join-Path $Root 'server\src\main\resources\application.yml')        'config\application.yml'        '应用配置参考'
-Copy-In (Join-Path $Root 'server\src\main\resources\default-content.json')   'config\default-content.json'   '默认内容种子'
+# 坑（会让后端起不来）：文件名必须是 application.yml.example，不能是 application.yml。
+# Spring Boot 的默认配置搜索路径包含 file:./config/，而 portfolio.service 的
+# WorkingDirectory 是 /opt/portfolio —— 只要 /opt/portfolio/config/application.yml 存在，
+# 它就会被加载，而且优先级高于 jar 内的配置。
+# 也就是说：这份「仅供参考」的副本会盖掉真正的生产配置；一旦它被改坏（见下面 5.1 的
+# 编码坑），后端直接启动失败并无限重启。改成 .example 就不会被 Spring 扫到。
+Copy-In (Join-Path $Root 'server\src\main\resources\application.yml')        'config\application.yml.example' '应用配置参考（不会被加载）'
+Copy-In (Join-Path $Root 'server\src\main\resources\default-content.json')   'config\default-content.json'    '默认内容种子'
 
 # --- 运维脚本 ---
 # 注意：仓库自带的 scripts/backup.sh 与 restore.sh 是 Docker 版（依赖 docker compose exec），
@@ -252,14 +295,20 @@ Copy-In (Join-Path $Root 'README.md')          'README.md'          '项目说�
 # application.yml 曾在 ${MYSQL_PASSWORD:xxx} 之类的位置带本机开发用的默认口令，
 # jar 内也有一份。仓库版本现已不留硬编码口令，这里仍防御性扫描并脱敏一次，
 # 避免把开发密码带上服务器。真正的生产值由 portfolio.env 通过环境变量注入。
-$appYmlStage = Join-Path $stage 'config\application.yml'
+$appYmlStage = Join-Path $stage 'config\application.yml.example'
 if (Test-Path $appYmlStage) {
-    $ymlText = Get-Content $appYmlStage -Raw
+    # 坑：这里必须用 .NET 显式按 UTF-8 读写。
+    # PowerShell 5.1 的 Get-Content 在没有 BOM 时按本机 ANSI（中文 Windows 是 GBK）解码，
+    # Set-Content -Encoding UTF8 再把这段被错解的文本写成 UTF-8 ——
+    # 结果就是中文注释全变乱码，而且乱码字符里有把换行"吃掉"的情况，
+    # 表现为注释行和配置行被合并成一行（upload-dir:、upload-allow-mime: 被吞进注释），
+    # YAML 直接解析失败：expected <block end>, but found '<block sequence start>'。
+    $ymlText = [System.IO.File]::ReadAllText($appYmlStage, [System.Text.Encoding]::UTF8)
     # 任何 ${XXX_PASSWORD:明文} 的兜底值一律清空，只保留占位符形式
     $ymlText = $ymlText -replace '(\$\{[A-Za-z_]*PASSWORD[A-Za-z_]*:)[^}\r\n]+(\})', '$1$2'
     $ymlText = $ymlText -replace 'please-change-me-please-change-me-please-change-me-32byte-minimum', 'CHANGEME-USE-openssl-rand-hex-48'
-    Set-Content -Path $appYmlStage -Value $ymlText -Encoding UTF8
-    Ok 'config/application.yml 已脱敏（默认密码替换为占位符，生产值由环境变量注入）'
+    [System.IO.File]::WriteAllText($appYmlStage, $ymlText, (New-Object System.Text.UTF8Encoding($false)))
+    Ok 'config/application.yml.example 已脱敏（默认密码替换为占位符，生产值由环境变量注入）'
 }
 
 # ============================== 5.2 生成裸机版运维脚本 ==============================
@@ -280,7 +329,7 @@ if [ -f "$ENV_FILE" ]; then
   set -a; . "$ENV_FILE"; set +a
 fi
 
-MYSQL_DB="${MYSQL_DB:-Cyan}"
+MYSQL_DB="${MYSQL_DB:-CyanWorks}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT_DIR"
 
@@ -324,7 +373,7 @@ if [ -f "$ENV_FILE" ]; then
   set -a; . "$ENV_FILE"; set +a
 fi
 
-MYSQL_DB="${MYSQL_DB:-Cyan}"
+MYSQL_DB="${MYSQL_DB:-CyanWorks}"
 
 echo "[restore] 导入数据库：$DB_FILE"
 gunzip -c "$DB_FILE" | mysql -h "${MYSQL_HOST:-127.0.0.1}" -P "${MYSQL_PORT:-3306}" \
@@ -341,8 +390,8 @@ echo "[restore] 完成。请执行 systemctl start portfolio"
 '@
 
 New-Item -ItemType Directory -Path (Join-Path $stage 'scripts') -Force | Out-Null
-Set-Content -Path (Join-Path $stage 'scripts\backup-ubuntu.sh')  -Value $backupScript  -Encoding UTF8
-Set-Content -Path (Join-Path $stage 'scripts\restore-ubuntu.sh') -Value $restoreScript -Encoding UTF8
+Write-Utf8NoBom (Join-Path $stage 'scripts\backup-ubuntu.sh')  $backupScript
+Write-Utf8NoBom (Join-Path $stage 'scripts\restore-ubuntu.sh') $restoreScript
 $manifest += [PSCustomObject]@{ 类别 = '运维脚本'; 包内路径 = 'scripts\backup-ubuntu.sh';  来源 = '(自动生成·裸机版)' }
 $manifest += [PSCustomObject]@{ 类别 = '运维脚本'; 包内路径 = 'scripts\restore-ubuntu.sh'; 来源 = '(自动生成·裸机版)' }
 
@@ -361,22 +410,27 @@ $deployDoc = @'
 | `deploy/nginx.conf` | Nginx 站点配置（已写好 /api、/media 反代） |
 | `deploy/portfolio.service` | systemd 单元（运行用户 portfolio） |
 | `deploy/env.production.example` | 环境变量模板，需复制成 `portfolio.env` 并填写 |
-| `deploy/redis.conf` | Redis 配置参考 |
-| `deploy/nginx-tls.conf.example` | 上 HTTPS 时的参考配置 |
+| `deploy/redis-ubuntu.conf` | **裸机专用** Redis 配置（含 `requirepass` 占位符，`dir` 已改为 `/var/lib/redis`） |
+| `deploy/nginx-ubuntu-tls.conf` | **裸机专用** HTTPS 配置（上游 8080、静态资源走 `root` 直出） |
+| `deploy/redis.conf` | Docker 版 Redis 配置（裸机**不要**用，`dir /data` 在裸机上不存在） |
+| `deploy/nginx-tls.conf.example` | Docker 版 HTTPS 参考（上游是 8081，裸机**不要**用） |
 | `db/schema.sql` | 建表脚本（幂等，可重复执行） |
-| `config/` | application.yml（已脱敏）与默认内容种子（jar 内已含，此处供查阅） |
+| `config/` | application.yml.example（已脱敏）与默认内容种子（jar 内已含，此处**仅供查阅**，不会被加载） |
 | `scripts/` | backup-ubuntu.sh / restore-ubuntu.sh 裸机版备份恢复脚本 |
 
 ## 1. 上传与解压
 
-用 Xftp 把 `deploy.zip` 传到服务器的 `/opt` 目录，然后：
+用 Xftp 把 `deploy.tar.gz` 传到服务器的 `/opt` 目录，然后：
 
 ```bash
-sudo apt update && sudo apt install -y unzip
 sudo mkdir -p /opt/portfolio
-sudo unzip -o /opt/deploy.zip -d /opt/portfolio
+sudo tar -xzf /opt/deploy.tar.gz -C /opt/portfolio
 ls -la /opt/portfolio          # 应看到 app.jar、web/、deploy/、db/、config/、scripts/
 ```
+
+> 包是 tar.gz 而不是 zip：Windows 的 `Compress-Archive` 会在 zip 里写反斜杠路径
+> （`deploy\nginx.conf`），Linux 解压后不建目录、只得到一堆带反斜杠的扁平文件，
+> 目录结构全丢。tar 用正斜杠，两边都不会出问题。
 
 ## 2. 安装运行时
 
@@ -391,21 +445,40 @@ java -version        # 需显示 17.x
 
 ```bash
 sudo mysql -e "CREATE DATABASE IF NOT EXISTS Cyan CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-sudo mysql -e "CREATE USER IF NOT EXISTS 'yc_app'@'%' IDENTIFIED BY '换成强密码';"
-sudo mysql -e "GRANT ALL PRIVILEGES ON Cyan.* TO 'yc_app'@'%'; FLUSH PRIVILEGES;"
+sudo mysql -e "CREATE USER IF NOT EXISTS 'Cyan'@'%' IDENTIFIED BY '换成强密码';"
+sudo mysql -e "GRANT ALL PRIVILEGES ON CyanWorks.* TO 'Cyan'@'%'; FLUSH PRIVILEGES;"
 
-mysql -h 127.0.0.1 -u yc_app -p Cyan < /opt/portfolio/db/schema.sql
+mysql -h 127.0.0.1 -u Cyan -p CyanWorks < /opt/portfolio/db/schema.sql
 ```
 
 > 首次部署 `JPA_DDL=update` 会自动补齐实体对应的表；稳定运行后可改成 `validate`。
 
 ## 4. 配置 Redis 密码
 
+**不要手改 `/etc/redis/redis.conf`** —— 填完 `portfolio.env` 后交给脚本做：
+
 ```bash
-sudo sed -i 's/^# *requirepass .*/requirepass 换成强密码/' /etc/redis/redis.conf
-grep -q '^requirepass' /etc/redis/redis.conf || echo 'requirepass 换成强密码' | sudo tee -a /etc/redis/redis.conf
-sudo systemctl restart redis-server
-redis-cli -a '换成强密码' ping      # 应返回 PONG
+sudo bash /opt/portfolio/setup-ubuntu.sh --apply-secrets
+```
+
+它会自动完成三件事：
+
+1. 备份原配置为 `/etc/redis/redis.conf.bak.时间戳`
+2. 用 `deploy/redis-ubuntu.conf` 覆盖，并把 `__REDIS_PASSWORD__` 替换成 `portfolio.env` 里的真实密码
+3. 校正 `MYSQL_PORT=3306`，然后重启 Redis 并验证 `PONG`
+
+改了 `.env` 里的 Redis 密码后重跑一次即可（幂等）。
+
+> 为什么必须走这一步：`deploy/redis.conf` 是 Docker 版，靠
+> `redis-server redis.conf --requirepass $REDIS_PASSWORD` 命令行注入密码，
+> 文件里**故意不写** `requirepass`，且 `dir /data` 是容器路径。
+> 裸机直接用会导致「Redis 无密码被拒」或「起不来/无法持久化」。
+
+手工验证：
+
+```bash
+redis-cli -a '你的密码' ping      # 应返回 PONG
+systemctl status redis-server
 ```
 
 ## 5. 创建运行用户与目录
@@ -504,10 +577,15 @@ $setupScript = @'
 #!/usr/bin/env bash
 # =============================================================================
 #  Cyan · Studio —— Ubuntu 服务器初始化脚本（在服务器上执行）
-#  用法：
-#    sudo bash setup-ubuntu.sh              # 只做目录/用户/服务配置，不装软件
-#    sudo bash setup-ubuntu.sh --install-deps   # 额外 apt 安装 JDK/MySQL/Redis/Nginx
-#  注意：数据库密码、Redis 密码、JWT 密钥不在此脚本中处理，请按 DEPLOY.md 手动填写。
+#  用法（按这个顺序跑）：
+#    1) sudo bash setup-ubuntu.sh --install-deps
+#         装 JDK / MySQL / Redis / Nginx，建用户目录，注册 systemd 与 nginx
+#    2) 编辑 /opt/portfolio/deploy/portfolio.env，填好所有密码与密钥
+#    3) sudo bash setup-ubuntu.sh --apply-secrets
+#         把 Redis 密码注入 /etc/redis/redis.conf，并校正 MYSQL_PORT=3306
+#    4) sudo systemctl start portfolio
+#
+#  --apply-secrets 可重复执行（幂等），改了 .env 里的 Redis 密码后重跑即可。
 # =============================================================================
 set -euo pipefail
 
@@ -524,13 +602,111 @@ fi
 if [[ "${1:-}" == "--install-deps" ]]; then
   echo ">>> 安装运行时依赖..."
   apt-get update -y
-  apt-get install -y unzip curl ca-certificates
+  apt-get install -y curl ca-certificates
   apt-get install -y openjdk-17-jre-headless mysql-server redis-server nginx
+
+  # ---------- 小内存机型保护（2 GiB 轻量服务器必做）----------
+  # MySQL 8 + JVM + Redis + Nginx 同时在 2 GiB 上跑，内存很紧。
+  # 没有 swap 时一旦吃满，内核 OOM Killer 会随机杀进程（常见的是把 MySQL 杀掉），
+  # 表现为后端突然连不上库、日志里只看到 Connection refused。
+  if [ ! -f /swapfile ]; then
+    echo ">>> 创建 2 GiB swap（系统盘 40 GiB，占用可接受）..."
+    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "    swap 已启用：$(free -h | awk '/^Swap:/ {print $2}')"
+  else
+    echo ">>> swap 已存在，跳过"
+  fi
+
+  # 降低换页倾向：还有内存时别急着用 swap，避免无谓的磁盘 IO
+  sysctl -w vm.swappiness=10 >/dev/null 2>&1 || true
+  grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+
+  # ---------- MySQL 小内存调优 ----------
+  # 默认 max_connections=151、缓冲池按需增长，在 2 GiB 上会和 JVM 抢内存。
+  if [ -d /etc/mysql/conf.d ]; then
+    cat > /etc/mysql/conf.d/portfolio-small.cnf <<'MYCNF'
+[mysqld]
+innodb_buffer_pool_size = 192M
+max_connections = 60
+table_open_cache = 400
+MYCNF
+    echo ">>> 已写入 MySQL 小内存配置 /etc/mysql/conf.d/portfolio-small.cnf"
+    systemctl restart mysql 2>/dev/null || systemctl restart mysqld 2>/dev/null || true
+  fi
+fi
+
+# ---------- 应用密钥：Redis 密码注入 + MySQL 端口校正 ----------
+# 必须在填完 portfolio.env 之后执行；可重复运行（幂等）
+if [[ "${1:-}" == "--apply-secrets" ]]; then
+  ENV_FILE="$APP_DIR/deploy/portfolio.env"
+
+  if [ ! -f "$ENV_FILE" ]; then
+    echo "未找到 $ENV_FILE"
+    echo "请先执行："
+    echo "  cp $APP_DIR/deploy/env.production.example $ENV_FILE"
+    echo "  chmod 600 $ENV_FILE"
+    exit 1
+  fi
+
+  echo ">>> 校正 MYSQL_PORT（后端默认已是 3306，显式写一份更保险）"
+  if grep -q '^MYSQL_PORT=' "$ENV_FILE"; then
+    sed -i 's|^MYSQL_PORT=.*|MYSQL_PORT=3306|' "$ENV_FILE"
+  else
+    printf 'MYSQL_PORT=3306\n' >> "$ENV_FILE"
+  fi
+
+  REDIS_PW="$(sed -n 's/^REDIS_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')"
+
+  if [ -z "$REDIS_PW" ] || [ "$REDIS_PW" = "改成强密码-至少16位" ]; then
+    echo
+    echo "[跳过] REDIS_PASSWORD 仍是模板占位值，请先在 $ENV_FILE 里填真实密码"
+    echo "       改完再跑：sudo bash setup-ubuntu.sh --apply-secrets"
+    exit 1
+  fi
+
+  if [ ! -f "$APP_DIR/deploy/redis-ubuntu.conf" ]; then
+    echo "[跳过] 未找到 $APP_DIR/deploy/redis-ubuntu.conf，压缩包可能不完整"
+    exit 1
+  fi
+
+  echo ">>> 安装裸机版 Redis 配置并注入密码"
+  if [ -f /etc/redis/redis.conf ]; then
+    cp -a /etc/redis/redis.conf "/etc/redis/redis.conf.bak.$(date +%Y%m%d%H%M%S)"
+    echo "    已备份原配置：/etc/redis/redis.conf.bak.*"
+  fi
+
+  sed "s|__REDIS_PASSWORD__|${REDIS_PW}|" "$APP_DIR/deploy/redis-ubuntu.conf" > /etc/redis/redis.conf
+  chown redis:redis /etc/redis/redis.conf 2>/dev/null || true
+  chmod 640 /etc/redis/redis.conf
+
+  mkdir -p /var/lib/redis /var/log/redis
+  chown -R redis:redis /var/lib/redis /var/log/redis 2>/dev/null || true
+
+  systemctl restart redis-server
+  sleep 2
+
+  if redis-cli -a "$REDIS_PW" ping 2>/dev/null | grep -q PONG; then
+    echo "    Redis 已就绪（密码校验通过）"
+  else
+    echo "    [警告] Redis 未返回 PONG，请检查：systemctl status redis-server"
+  fi
+
+  echo
+  echo "============================================================================="
+  echo " 密钥应用完成。接下来："
+  echo "  1) 确认 MySQL 已建库建用户（见 DEPLOY.md）"
+  echo "  2) systemctl start portfolio && journalctl -u portfolio -f"
+  echo "============================================================================="
+  exit 0
 fi
 
 # ---------- 校验解压内容 ----------
 if [ ! -f "$APP_DIR/app.jar" ]; then
-  echo "未找到 $APP_DIR/app.jar，请先把 deploy.zip 解压到 $APP_DIR"; exit 1
+  echo "未找到 $APP_DIR/app.jar，请先把 deploy.tar.gz 解压到 $APP_DIR"; exit 1
 fi
 if [ ! -d "$APP_DIR/web" ]; then
   echo "未找到 $APP_DIR/web，压缩包不完整"; exit 1
@@ -593,16 +769,18 @@ fi
 
 echo
 echo "============================================================================="
-echo " 初始化完成。接下来请手动完成："
-echo "  1) 建库建用户：见 DEPLOY.md 第 3 步"
-echo "  2) 设置 Redis 密码：见 DEPLOY.md 第 4 步"
-echo "  3) 编辑 $APP_DIR/deploy/portfolio.env 填入密码与密钥"
+echo " 初始化完成。接下来请按顺序完成："
+echo "  1) 建库建用户（MySQL）：见 DEPLOY.md"
+echo "  2) 编辑 $APP_DIR/deploy/portfolio.env 填入密码与密钥"
+echo "  3) sudo bash $APP_DIR/setup-ubuntu.sh --apply-secrets"
+echo "     （把 Redis 密码注入 /etc/redis/redis.conf，并校正 MYSQL_PORT=3306）"
 echo "  4) systemctl start portfolio && journalctl -u portfolio -f"
+echo "  5) 需要 HTTPS：certbot --nginx -d 域名 -d www.域名"
 echo "============================================================================="
 '@
 
-Set-Content -Path (Join-Path $stage 'DEPLOY.md')       -Value $deployDoc   -Encoding UTF8
-Set-Content -Path (Join-Path $stage 'setup-ubuntu.sh') -Value $setupScript -Encoding UTF8
+Write-Utf8NoBom (Join-Path $stage 'DEPLOY.md')       $deployDoc
+Write-Utf8NoBom (Join-Path $stage 'setup-ubuntu.sh') $setupScript
 $manifest += [PSCustomObject]@{ 类别 = '部署文档'; 包内路径 = 'DEPLOY.md';        来源 = '(自动生成)' }
 $manifest += [PSCustomObject]@{ 类别 = '初始化脚本'; 包内路径 = 'setup-ubuntu.sh'; 来源 = '(自动生成)' }
 
@@ -644,8 +822,18 @@ if ($leaks.Count -gt 0) {
 
 # ============================== 打包 ==============================
 $zipPath = Join-Path $Root $OutFile
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipPath -Force
+Remove-BuildArtifact $zipPath
+# 用 tar.exe 打包，而不用 Compress-Archive。
+# 坑（会导致部署彻底失败）：PowerShell 的 Compress-Archive 在 zip 里写的是
+# Windows 反斜杠路径（deploy\nginx.conf、web\index.html）。
+# 在 Linux 上反斜杠是合法文件名字符，unzip / python zipfile 解压后不会建目录，
+# 而是得到一堆名字里带反斜杠的扁平文件 —— 整个目录结构丢失，
+# app.jar 找不到 web/、deploy/、db/，部署直接跑不起来。
+# tar 天然用正斜杠，且 Windows 10+ 自带、Linux 原生支持，故改用 tar.gz。
+$tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+if (-not $tar) { Fail '未找到 tar.exe（Windows 10 1803+ 自带），无法打包'; exit 1 }
+& tar.exe -czf $zipPath -C $stage .
+if ($LASTEXITCODE -ne 0) { Fail '打包失败（tar 返回非零）'; exit 1 }
 
 $zipInfo = Get-Item $zipPath
 $fileCount = (Get-ChildItem $stage -Recurse -File).Count
@@ -658,11 +846,11 @@ Write-Host "`n--- 包内清单 ---" -ForegroundColor Cyan
 $manifest | Format-Table -AutoSize | Out-String | Write-Host
 
 if (-not $KeepStage) {
-    Remove-Item $stage -Recurse -Force
+    Remove-BuildArtifact $stage
     Ok '已清理中间暂存目录 _deploy_stage'
 }
 
 Write-Host "`n下一步：" -ForegroundColor Yellow
-Write-Host "  1) 用 Xftp 把 deploy.zip 传到服务器 /opt" -ForegroundColor White
-Write-Host "  2) 服务器上执行：unzip -o /opt/deploy.zip -d /opt/portfolio" -ForegroundColor White
+Write-Host "  1) 用 Xftp 把 $OutFile 传到服务器 /opt" -ForegroundColor White
+Write-Host "  2) 服务器上执行：mkdir -p /opt/portfolio && tar -xzf /opt/$OutFile -C /opt/portfolio" -ForegroundColor White
 Write-Host "  3) 按包内 DEPLOY.md（或执行 bash setup-ubuntu.sh --install-deps）完成部署`n" -ForegroundColor White

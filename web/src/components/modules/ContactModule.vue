@@ -18,6 +18,20 @@ const form = reactive({
 const state = ref<'idle' | 'sending' | 'ok' | 'error'>('idle')
 const error = ref('')
 
+/**
+ * 限流弹窗。
+ * ---------------------------------------------------------------------------
+ * 后端对「同一个 IP 一分钟内超过 5 次提交」返回 429，并锁定 10 分钟。
+ * 这种情况只在表单底部用一行小字提示太容易被忽略，所以单独弹一条居中提示。
+ */
+const toast = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function showToast(text: string, ms = 4000) {
+  toast.value = text
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (toast.value = ''), ms)
+}
+
 async function submit() {
   if (state.value === 'sending') return
   state.value = 'sending'
@@ -29,7 +43,10 @@ async function submit() {
     form.name = form.contact = form.message = form.budget = ''
   } catch (e: any) {
     state.value = 'error'
-    error.value = e?.message || '发送失败'
+    const msg = e?.message || '发送失败'
+    error.value = msg
+    // 429 = 同一 IP 提交过于频繁（一分钟内超过 5 次），弹出明确提示
+    if (e?.status === 429) showToast(msg)
   }
 }
 </script>
@@ -87,8 +104,50 @@ async function submit() {
       </div>
     </form>
   </div>
+
+  <!-- 限流弹窗：同一 IP 一分钟内提交超过 5 次时弹出 -->
+  <Teleport to="body">
+    <div v-if="toast" class="inquiry-toast" role="alert">
+      <span class="inquiry-toast__ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3 1.5 21h21L12 3zm1 13h-2v2h2v-2zm0-7h-2v5h2V9z" /></svg>
+      </span>
+      <span>{{ toast }}</span>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .btn[disabled] { opacity: .6; cursor: default; transform: none; }
+</style>
+
+<style>
+.inquiry-toast {
+  position: fixed;
+  left: 50%;
+  top: 96px;
+  z-index: 9999;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 460px);
+  padding: 13px 20px;
+  border-radius: var(--r-full, 999px);
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(20, 20, 24, .92);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .32);
+  animation: inquiry-toast-in .32s cubic-bezier(.2, .9, .3, 1.2);
+}
+.inquiry-toast__ico { display: grid; place-items: center; flex: none; }
+.inquiry-toast__ico svg { width: 18px; height: 18px; fill: #ffd60a; }
+@keyframes inquiry-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(.96); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
 </style>

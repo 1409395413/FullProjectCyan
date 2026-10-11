@@ -1,6 +1,7 @@
 package com.yuchen.portfolio.repository;
 
 import com.yuchen.portfolio.entity.VisitSession;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -30,4 +31,14 @@ public interface VisitSessionRepository extends JpaRepository<VisitSession, Long
   /** 当天真正点开过作品的会话数（用来算播放率） */
   @Query("select count(s) from VisitSession s where s.day = :day and s.playCount > 0")
   long countPlayedSessionsByDay(@Param("day") String day);
+
+  /**
+   * 取窗口内的会话，用于「地域 / 设备 / 来源 / 时段」这类 SQL 不好分组的聚合
+   * （UA、referrer 都得在 Java 里拆）。
+   *
+   * <p>用 Pageable 硬性截断：站点流量小（历史 85 条），但万一哪天爆了，
+   * 宁可少统计也不能把整表拉进内存 —— 2G 机器经不起。
+   */
+  @Query("select s from VisitSession s where s.startedAt >= :from order by s.startedAt desc")
+  List<VisitSession> since(@Param("from") Instant from, Pageable pageable);
 }

@@ -20,6 +20,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -51,6 +53,34 @@ public class SecurityConfig {
     return new BCryptPasswordEncoder(12);
   }
 
+  /**
+   * 显式提供一个「没有本地用户」的 {@link UserDetailsService}。
+   *
+   * <p>目的只有一个：让 Boot 的 {@code UserDetailsServiceAutoConfiguration} 退场。
+   * 那个自动配置在「容器里没有 AuthenticationManager / AuthenticationProvider /
+   * UserDetailsService」时会自己造一个内存账号 user，并在启动日志里打印：
+   *
+   * <pre>
+   *   Using generated security password: xxxxxxxx-xxxx-...
+   * </pre>
+   *
+   * <p>本项目是纯无状态 JWT：账号存在 MySQL 的 admin_user 表里，密码在 AuthService 内
+   * 用上面的 BCrypt 比对，压根不走 Spring Security 的 UserDetailsService 那套。
+   * 本配置里 httpBasic / formLogin / logout 也全部 disable，
+   * 所以那个自动生成的账号实际上**无法被用来登录**——但它有两个副作用值得消掉：
+   *   1. 日志里出现一串像密钥的东西，运维排查时容易被误当成泄漏；
+   *   2. 平白在内存里多一个用户，属于配置噪声。
+   *
+   * <p>这里返回「查任何用户都抛 UsernameNotFoundException」，是 fail-closed 的写法：
+   * 万一将来有人手滑打开了 basic 认证，也只会登录失败，不会放过一个默认账号。
+   */
+  @Bean
+  public UserDetailsService userDetailsService() {
+    return username -> {
+      throw new UsernameNotFoundException("本地用户库为空：" + username);
+    };
+  }
+
   @Bean
   public SecurityFilterChain filterChain(HttpSecurity http,
       JwtAuthenticationFilter jwtFilter,
@@ -69,6 +99,9 @@ public class SecurityConfig {
           .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
           .requestMatchers(HttpMethod.GET, "/api/content").permitAll()
           .requestMatchers(HttpMethod.GET, "/media/**").permitAll()
+          // 视频首帧封面：前台访客也要能加载，否则手机端视频卡片是一片灰。
+          // 必须排在下面 "/api/media/** 需登录" 之前 —— 授权规则按顺序匹配，先看命中谁。
+          .requestMatchers(HttpMethod.GET, "/api/media/poster").permitAll()
           .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
           // 匿名写入只有两个：访客留言与访问埋点，二者都在 Controller 内部按 IP 限流
           .requestMatchers(HttpMethod.POST, "/api/inquiry").permitAll()

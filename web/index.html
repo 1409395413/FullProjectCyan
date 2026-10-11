@@ -6,10 +6,66 @@
   <meta name="description" content="摄影 · 剪辑 · 直播搭建 · AI 视频制作 —— 个人影像作品集" />
   <meta name="theme-color" content="#f5f5f7" />
   <title>Cyan · Studio</title>
+  <script>
+    /*
+     * 昼夜主题：在 CSS 生效之前就把 data-theme 写到 <html> 上，防止首帧闪色。
+     *
+     * 主题现在**跟随北京时间自动变化**（日出日落由 ThemeDock 用真实太阳位置计算），
+     * 不再读用户的 localStorage 选择 —— 这里只做一次"粗略"判断用于首帧：
+     * 日出日落全年浮动约 ±1.5 小时，取折中 6:00 / 18:30，
+     * 页面加载后 ThemeDock 会按当天真实的日出日落精确纠正，纠正带渐变过渡，不会跳。
+     *
+     * 内联脚本必须同步执行、不能背一套天文数学，所以这里是估算值不是精确值。
+     */
+    (function () {
+      try {
+        var bj = new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60000);
+        var h = bj.getUTCHours() + bj.getUTCMinutes() / 60;
+        var t = (h >= 6 && h < 18.5) ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', t === 'dark' ? '#0b0b0d' : '#f5f5f7');
+      } catch (e) { /* 极端环境：不设也能用，ThemeDock 会补上 */ }
+    })();
+  </script>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%230071e3'/%3E%3Cstop offset='1' stop-color='%2300c8d7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='45' font-size='36' font-family='Helvetica,Arial' font-weight='600' fill='%23fff' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E" />
+  <style>
+    /* 首帧骨架：JS 还在解析时就有东西可见，Vue 挂载后会被整个替换掉。
+       样式刻意内联、不依赖主题变量 —— 这时业务 CSS 还没到位。 */
+    #boot-shell {
+      max-width: 1200px; margin: 0 auto; padding: 96px 24px 64px;
+      animation: boot-fade .3s ease both;
+    }
+    #boot-shell .b-hero {
+      height: 46vh; min-height: 260px; border-radius: 22px;
+      background: rgba(120, 120, 128, .12);
+    }
+    #boot-shell .b-cards {
+      margin-top: 22px; display: grid; gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+    #boot-shell .b-cards i {
+      display: block; aspect-ratio: 4 / 3; border-radius: 16px;
+      background: rgba(120, 120, 128, .12);
+      animation: boot-pulse 1.6s ease-in-out infinite;
+    }
+    #boot-shell .b-cards i:nth-child(2) { animation-delay: .08s; }
+    #boot-shell .b-cards i:nth-child(3) { animation-delay: .16s; }
+    #boot-shell .b-cards i:nth-child(4) { animation-delay: .24s; }
+    @keyframes boot-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+    @keyframes boot-fade { from { opacity: 0; } to { opacity: 1; } }
+    html[data-theme='dark'] #boot-shell .b-hero,
+    html[data-theme='dark'] #boot-shell .b-cards i { background: rgba(255, 255, 255, .08); }
+    @media (prefers-reduced-motion: reduce) { #boot-shell .b-cards i { animation: none; } }
+  </style>
 </head>
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <div id="boot-shell" aria-hidden="true">
+      <div class="b-hero"></div>
+      <div class="b-cards"><i></i><i></i><i></i><i></i></div>
+    </div>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

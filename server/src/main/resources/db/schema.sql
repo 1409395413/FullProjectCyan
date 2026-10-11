@@ -1,7 +1,7 @@
 -- =============================================================================
 --  Cyan · Studio · MySQL 8 schema
 --  说明：ddl-auto=update 时能自动生成，但生产建议以本文件为准（validate 模式）
---  执行：  mysql -h127.0.0.1 -P3307 -uroot -p Cyan < server/src/main/resources/db/schema.sql
+--  执行：  mysql -h127.0.0.1 -P3307 -uroot -p CyanWorks < server/src/main/resources/db/schema.sql
 -- =============================================================================
 SET NAMES utf8mb4;
 
@@ -67,6 +67,26 @@ CREATE TABLE IF NOT EXISTS media_asset (
   INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 素材标签。名字唯一，改名 = 改这一行，所有素材跟着变
+CREATE TABLE IF NOT EXISTS media_tag (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(64)  NOT NULL COMMENT '标签名，唯一',
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_tag_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- 素材 × 标签。PRIMARY KEY(asset_id, tag_id) 本身就是「一条素材重复打同一标签」的兜底
+CREATE TABLE IF NOT EXISTS media_asset_tag (
+  id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+  asset_id    BIGINT       NOT NULL,
+  tag_id      BIGINT       NOT NULL,
+  created_at  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_asset_tag (asset_id, tag_id),
+  INDEX idx_tag (tag_id),
+  CONSTRAINT fk_mat_asset FOREIGN KEY (asset_id) REFERENCES media_asset (id) ON DELETE CASCADE,
+  CONSTRAINT fk_mat_tag   FOREIGN KEY (tag_id)   REFERENCES media_tag (id)   ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- ---------------------------- 工作对接（访客需求）----------------------------
 CREATE TABLE IF NOT EXISTS inquiry (
   id          BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -97,8 +117,11 @@ CREATE TABLE IF NOT EXISTS visit_session (
   duration_ms  BIGINT       NOT NULL DEFAULT 0,
   play_count   INT          NOT NULL DEFAULT 0,
   day          CHAR(10)     NULL COMMENT 'yyyy-MM-dd，按 Asia/Shanghai 计算',
+  country      VARCHAR(32)  NULL COMMENT '国家；改造前的历史数据为 NULL',
+  region       VARCHAR(32)  NULL COMMENT '省/直辖市（离线库 ip2region，只到省级）',
   INDEX idx_day (day),
-  INDEX idx_started (started_at)
+  INDEX idx_started (started_at),
+  INDEX idx_region (region)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS visit_event (

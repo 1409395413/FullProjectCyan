@@ -61,6 +61,17 @@ public class VisitSession {
   @Column(name = "day", length = 10)
   private String day;
 
+  /**
+   * 地域：只在会话入库那一刻用原始 IP 查一次离线库得到，之后 IP 本身被丢弃。
+   * 精度到<b>省/直辖市</b>，不存市以下的粒度。查不到时写「未知」，
+   * 2026-10-09 改造前的历史会话没有这两个字段，旧数据一律显示「未知」。
+   */
+  @Column(name = "country", length = 32)
+  private String country;
+
+  @Column(name = "region", length = 32)
+  private String region;
+
   @PrePersist
   void onCreate() {
     Instant now = Instant.now();

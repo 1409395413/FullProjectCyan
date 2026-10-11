@@ -13,6 +13,13 @@ foreach ($p in $add) { if (Test-Path $p -and ($env:Path -notlike "*$p*")) { $env
 $env:JAVA_HOME = Join-Path $Root 'jdk-17'
 $env:M2_HOME   = Join-Path $Root 'maven'
 
+# 载入仓库根 .env 到本会话 —— 子进程（后端 / 前端）会继承这些变量。
+# 必须加载：application.yml 里 MYSQL_PORT 的默认值是 3306（生产标准端口），
+# 而本机便携 MySQL 跑在 3307，不注入环境变量后端会连错库。
+. (Join-Path $PSScriptRoot 'load-env.ps1') | Out-Null
+if (-not $env:MYSQL_PORT) { $env:MYSQL_PORT = '3307' }
+Write-Host "[dev] MYSQL_PORT=$env:MYSQL_PORT  REDIS_PORT=$env:REDIS_PORT" -ForegroundColor DarkGray
+
 Write-Host '[dev] starting MySQL (port 3307) ...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'mysql-start.ps1')
 

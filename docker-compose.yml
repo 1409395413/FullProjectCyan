@@ -15,7 +15,7 @@ name: portfolio
 services:
   mysql:
     image: mysql:8.0
-    container_name: yc-mysql
+    container_name: Cyan-mysql
     restart: always
     command:
       - --character-set-server=utf8mb4
@@ -30,7 +30,7 @@ services:
       - "3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DB:-Cyan}
+      MYSQL_DATABASE: ${MYSQL_DB:-CyanWorks}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       TZ: Asia/Shanghai
@@ -51,7 +51,7 @@ services:
 
   redis:
     image: redis:7.2-alpine
-    container_name: yc-redis
+    container_name: Cyan-redis
     restart: always
     # 不映射宿主端口，只在内部网络可达
     expose:
@@ -84,7 +84,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: yc-api
+    container_name: Cyan-api
     restart: always
     depends_on:
       mysql:
@@ -97,7 +97,7 @@ services:
       SPRING_PROFILES_ACTIVE: prod
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: ${MYSQL_DB:-Cyan}
+      MYSQL_DB: ${MYSQL_DB:-CyanWorks}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       # 默认 update：无论 schema.sql 有没有跑过，实体都能对上；稳定后可改 validate
@@ -131,7 +131,7 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
-    container_name: yc-web
+    container_name: Cyan-web
     restart: always
     depends_on:
       api:

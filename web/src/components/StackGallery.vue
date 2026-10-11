@@ -2,12 +2,18 @@
 /**
  * StackGallery — 卡牌叠加画廊（核心交互）
  * ---------------------------------------------------------------------------
- * · 素材多时横向叠加成扇形牌；悬停哪张，哪张(Q弹)放大成主播放位并保持
+ * · 素材多时横向叠加成扇形牌；<b>点哪张</b>，哪张(Q弹)放大成主播放位并保持
+ *   —— 刻意不做「悬停即展开」：鼠标从卡片上方扫过时会误触，
+ *      还没滑到想看的那张、前面那张就弹出来了
  * · 点右上角 ✕ 收牌还原；支持 ← → 切换 / Esc 关闭 / 键盘 Enter、Space
  * · 选中瞬间是 squash & stretch 果冻动画，不是单纯缩放
  * · 窄屏（<620px）自动切成横向滑动 + 点击开全屏灯箱
  *
- * 横竖屏兼容（新增）：
+ * 同时只播一个（见 util/video.ts）：
+ *   · 点开新的一张，旧的立刻停；
+ *   · 整个板块滚出视口时自动收牌（收到 portfolio:video-close 事件）。
+ *
+ * 横竖屏兼容：
  *   · 收拢态：所有牌共用 UNIFORM_RATIO 画框 —— 竖屏和横屏混排也整齐；
  *   · 展开态：按素材真实比例 fit 进舞台，竖屏变高、横屏变宽，尺寸真的会变；
  *   · 点开即记为一次「作品播放」，进后台的监控板块。
@@ -17,6 +23,7 @@ import MediaFrame from './MediaFrame.vue'
 import type { MediaItem } from '@/types/content'
 import { orientationOf } from '@/util/content'
 import { trackPlay } from '@/util/tracking'
+import { VIDEO_CLOSE_EVENT } from '@/util/video'
 
 const props = defineProps<{ items: MediaItem[] }>()
 
@@ -32,7 +39,6 @@ const UNIFORM_RATIO = 0.8
 type CardStyle = Record<string, string>
 const styles = ref<CardStyle[]>([])
 
-let hoverTimer: ReturnType<typeof setTimeout> | null = null
 let pickTimer: ReturnType<typeof setTimeout> | null = null
 const picking = ref<number | null>(null)
 
@@ -147,7 +153,6 @@ function pauseVideo(index: number | null) {
 }
 
 function setActive(i: number | null) {
-  if (hoverTimer) clearTimeout(hoverTimer)
   pauseVideo(active.value)
   active.value = i
   layout()
@@ -179,16 +184,12 @@ function relayoutWhenKnown() {
   requestAnimationFrame(() => setTimeout(layout, 30))
 }
 
-function onEnter(e: PointerEvent, i: number) {
-  if (carousel.value || e.pointerType === 'touch' || active.value === i) return
-  if (hoverTimer) clearTimeout(hoverTimer)
-  hoverTimer = setTimeout(() => { if (active.value !== i) setActive(i) }, 110)
-}
-
-function onLeave() {
-  if (hoverTimer) clearTimeout(hoverTimer)
-}
-
+/**
+ * 不做悬停自动展开。
+ * ---------------------------------------------------------------------------
+ * 之前是「鼠标停 110ms 就展开」，横向扫过一排牌时会连着误触好几张，
+ * 还没滑到目标那张，前面的就弹出来开始播了。现在只有明确的点击才展开。
+ */
 function onCardClick(e: MouseEvent, i: number) {
   if ((e.target as HTMLElement).closest('.sitem__close')) {
     e.stopPropagation()
@@ -234,12 +235,46 @@ function closeLightbox() {
   document.body.style.overflow = ''
 }
 
+/* ---------------- 自动收牌：滚出视口 / 别的视频抢占 ---------------- */
+/**
+ * 板块滚出视口就收牌。
+ * ---------------------------------------------------------------------------
+ * 单靠视频元素自己的可见性判断不够：展开后的卡片会超出画廊容器，
+ * 用户往下滑时卡片可能还露着一半、但整个作品区已经离场了，
+ * 所以这里对整个板块再观察一次。
+ */
+let outIo: IntersectionObserver | null = null
+function watchOutOfView() {
+  if (!('IntersectionObserver' in window) || !root.value) return
+  outIo?.disconnect()
+  outIo = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting || e.intersectionRatio < 0.25) {
+          if (active.value !== null) setActive(null)
+        }
+      }
+    },
+    { threshold: [0, 0.25, 0.6] }
+  )
+  outIo.observe(root.value)
+}
+
+/** 全局治理把本画廊里的视频关掉了 → 跟着收牌，保持视觉一致 */
+function onVideoClose(e: Event) {
+  const v = (e as CustomEvent<{ video: HTMLVideoElement }>).detail?.video
+  if (!v || active.value === null) return
+  if (root.value?.contains(v)) setActive(null)
+}
+
 /* ---------------- 生命周期 ---------------- */
 let ro: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(() => {
   layout()
+  watchOutOfView()
+  window.addEventListener(VIDEO_CLOSE_EVENT, onVideoClose)
   if ('ResizeObserver' in window && root.value) {
     ro = new ResizeObserver(() => {
       if (resizeTimer) clearTimeout(resizeTimer)
@@ -262,9 +297,10 @@ function onResize() {
 
 onBeforeUnmount(() => {
   ro?.disconnect()
+  outIo?.disconnect()
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onKey)
-  if (hoverTimer) clearTimeout(hoverTimer)
+  window.removeEventListener(VIDEO_CLOSE_EVENT, onVideoClose)
   if (pickTimer) clearTimeout(pickTimer)
   document.body.style.overflow = ''
 })
@@ -287,8 +323,7 @@ onBeforeUnmount(() => {
           role="button"
           tabindex="0"
           :aria-label="m.title || `作品 ${i + 1}`"
-          @pointerenter="onEnter($event, i)"
-          @pointerleave="onLeave"
+          :title="active === i ? '' : '点击展开播放'"
           @click="onCardClick($event, i)"
           @keydown.enter.prevent="carousel ? openLightbox(m) : setActive(i)"
           @keydown.space.prevent="carousel ? openLightbox(m) : setActive(i)"
@@ -300,6 +335,12 @@ onBeforeUnmount(() => {
               :big="active === i"
               :controls="active === i"
             />
+            <!--
+              收拢态不再叠播放键。
+              之前这里盖了一个 46px 的圆形 ▶，一片素材铺下来满屏幕都是同一个图标，
+              素材本身的画面反倒被压在下面。现在是干净的画面 + 右下角 `点任意一张展开播放`
+              的文案提示，含义一样，但眼睛先看到的是作品。
+            -->
             <div class="sitem__meta">
               <h4>{{ m.title || `作品 ${i + 1}` }}</h4>
               <span v-if="m.meta">{{ m.meta }}</span>
@@ -315,7 +356,7 @@ onBeforeUnmount(() => {
           <button class="stack__count" @click.stop="setActive(null)">{{ countText }}</button>
           <button aria-label="下一个" @click.stop="step(1)">›</button>
         </div>
-        <div class="stack__hint">移到任意一张查看 · 点 ✕ 收牌</div>
+        <div class="stack__hint">点任意一张展开播放 · 点 ✕ 收牌</div>
       </template>
 
       <div v-else class="ph r-16-9">
@@ -360,4 +401,30 @@ onBeforeUnmount(() => {
   left: 50%;
 }
 .stack--carousel .sitem { position: relative; }
+
+/* 悬停反馈：轻轻「弹一下下」
+ * ---------------------------------------------------------------------------
+ * 只做很小的放大 + 抬高阴影，绝不展开 —— 展开必须靠点击。
+ * 缩放放在 .sitem__body 上：卡牌自身的 transform 由内联的 --x/--y/--rot/--sc 驱动，
+ * 内联样式优先级高于样式表，直接改 .sitem 的 transform 是改不动的。
+ * 缓动用带一点回弹的曲线（末段 >1），按下去有"Q 一下"的手感，但幅度很小。
+ */
+.sitem__body {
+  transition: transform .42s cubic-bezier(.34, 1.46, .64, 1);
+}
+@media (hover: hover) {
+  .stack:not(.has-active) .sitem:hover .sitem__body {
+    transform: scale(1.035);
+  }
+  /* 悬停的牌抬到最上层，免得被相邻的牌压住一点点边 */
+  .stack:not(.has-active) .sitem:hover {
+    z-index: 90 !important;
+    box-shadow: 0 26px 58px rgba(0, 0, 0, .26), inset 0 1px 0 rgba(255, 255, 255, .7);
+  }
+}
+/* 触屏没有 hover，用按下的瞬间给同样的反馈 */
+.stack:not(.has-active) .sitem:active .sitem__body {
+  transform: scale(1.015);
+}
+
 </style>

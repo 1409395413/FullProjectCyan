@@ -5,16 +5,23 @@
  * 左：模块列表（增删 / 排序 / 停用）；中：按模块类型自动生成的字段表单；
  * 上：保存与导入导出。保存直接 PUT /api/content，前端刷新即可看到 —— 不需要重新构建。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { adminApi, fetchContent, tokenStore } from '@/api'
 import FieldsEditor from '@/components/admin/FieldsEditor.vue'
+import StatsCharts from '@/components/admin/StatsCharts.vue'
+import MediaTagEditor from '@/components/admin/MediaTagEditor.vue'
+import MediaTagManager from '@/components/admin/MediaTagManager.vue'
 import { SITE_FIELDS, TYPE_DEFS, typeDef } from '@/moduleSchema'
+import { downloadCsv, fileStamp, formatDateTime } from '@/util/exportCsv'
 import type {
   AdminStats,
   AdminStatus,
   InquiryStatus,
   InquiryView,
+  MediaBatchUploadItem,
+  MediaItemView,
+  MediaTagView,
   PortfolioModule,
   RevisionItem,
   SiteContent
@@ -60,7 +67,46 @@ onMounted(async () => {
 })
 
 async function fetchRemote() {
-  return fetchContent()
+  const c = await fetchContent()
+  // 老数据里没有 showBeian 字段，而前端语义是「字段缺失 = 显示备案信息」。
+  // 这里补成 true，让后台开关的勾选状态与实际显示行为保持一致
+  // （否则用户填完备案号、开关看着是关的，保存后会被写成 false 反而不显示）。
+  if (c?.site && typeof c.site.showBeian !== 'boolean') c.site.showBeian = true
+  migrateCases(c)
+  return c
+}
+
+/**
+ * 老内容的案例只有 `media` 单条素材，新结构改成 `mediaList` 数组。
+ *
+ * 光判断「mediaList 是不是数组」不够：一旦里面已经有素材位（哪怕是空占位），
+ * 老规则就不再搬运 media，于是两条并存，前台在 mediaList 没图时会兜底渲染
+ * media 里那张 —— 后台表单看不见它，删不掉也改不了。
+ *
+ * 这里改成和后端 ContentValidator 完全相同的收敛逻辑：
+ * 有真素材就用 mediaList、否则把 media 顶成第一条，两边都不留 `media`。
+ * 后台载入时就地升级，保存后自然写成新结构 —— 不需要数据库迁移脚本。
+ */
+function migrateCases(c: SiteContent | null) {
+  for (const m of c?.modules || []) {
+    if (m.type !== 'cases') continue
+    for (const item of (m as any).cases || []) {
+      if (!item) continue
+      if (!Array.isArray(item.mediaList)) {
+        item.mediaList = item.media && item.media.src ? [item.media] : []
+        delete item.media
+        continue
+      }
+      const hasReal = item.mediaList.some((x: any) => x && x.src)
+      if (hasReal || !item.media?.src) {
+        delete item.media
+      } else {
+        const rest = item.mediaList.filter((x: any) => x && x.src)
+        item.mediaList = [item.media, ...rest]
+        delete item.media
+      }
+    }
+  }
 }
 
 async function loadStatus() {
@@ -91,15 +137,164 @@ function humanDuration(ms?: number): string {
   return `${Math.floor(m / 60)} 小时 ${m % 60} 分`
 }
 
-const maxSeries = computed(() => {
-  const arr = stats.value?.series || []
-  return Math.max(1, ...arr.map((d) => d.sessions))
-})
+/** 「较昨日 ↑↓ x%」的小箭头；null = 昨日基数为 0，显示「新增」 */
+function deltaArrow(v?: number | null): string {
+  if (v === null || v === undefined) return '↑ 新增'
+  if (v === 0) return '持平'
+  return v > 0 ? `↑ ${v}%` : `↓ ${Math.abs(v)}%`
+}
+function deltaClass(v?: number | null): string {
+  if (v === null || v === undefined || v > 0) return 'is-up'
+  return v === 0 ? 'is-flat' : 'is-down'
+}
 
 const filteredInquiries = computed(() => {
   const all = inquiries.value
   return inboxFilter.value === 'all' ? all : all.filter((q) => q.status === inboxFilter.value)
 })
+
+/* ---------------------- 工单勾选与批量导出 ---------------------- */
+/** 勾选的工单 id。切换筛选/刷新不会丢，方便跨状态挑几条一起导出。 */
+const picked = ref<number[]>([])
+
+function isPicked(id: number) {
+  return picked.value.includes(id)
+}
+
+function togglePick(id: number, on: boolean) {
+  picked.value = on
+    ? Array.from(new Set([...picked.value, id]))
+    : picked.value.filter((x) => x !== id)
+}
+
+/** 当前筛选下已勾选的条数（导出以「当前列表 ∩ 已勾选」为准） */
+const pickedCount = computed(
+  () => filteredInquiries.value.filter((q) => picked.value.includes(q.id)).length
+)
+
+const allPicked = computed(
+  () =>
+    filteredInquiries.value.length > 0 &&
+    filteredInquiries.value.every((q) => picked.value.includes(q.id))
+)
+
+function toggleAll(on: boolean) {
+  const ids = filteredInquiries.value.map((q) => q.id)
+  picked.value = on
+    ? Array.from(new Set([...picked.value, ...ids]))
+    : picked.value.filter((x) => !ids.includes(x))
+}
+
+/**
+ * 批量删除：两段式确认，不弹 window.confirm。
+ * ---------------------------------------------------------------------------
+ * 删除是不可逆的 —— 一次误点就能清掉一批真实客户留言，而且没有回收站。
+ * 所以第一次点击只进入「待确认」，按钮变成"再点一次确认删除 N 条"，
+ * 4 秒内没有第二次点击就自动撤回。
+ *
+ * 不用 confirm() 的理由：它冻结整个页面、样式不受控、还会被浏览器折叠成
+ * "此页面显示"之类的无关提示，实际防误触效果很差。
+ */
+const confirmDelete = ref(false)
+let confirmTimer: ReturnType<typeof setTimeout> | undefined
+
+function clearConfirm() {
+  if (confirmTimer) clearTimeout(confirmTimer)
+  confirmTimer = undefined
+  confirmDelete.value = false
+}
+
+function askDeletePicked() {
+  const list = filteredInquiries.value.filter((q) => picked.value.includes(q.id))
+  if (!list.length) {
+    flash('err', '还没有勾选工单')
+    return
+  }
+  if (!confirmDelete.value) {
+    confirmDelete.value = true
+    confirmTimer = setTimeout(clearConfirm, 4000)
+    return
+  }
+  doDeletePicked(list)
+}
+
+async function doDeletePicked(list: InquiryView[]) {
+  clearConfirm()
+  let ok = 0
+  let fail = 0
+  // 一条一条删：后端只有单条删除接口。数量本来就不大（几十条量级），
+  // 逐条还能拿到每条的成败，好过一口气发个批量接口然后只知道"整体失败"。
+  for (const q of list) {
+    try {
+      await adminApi.deleteInquiry(q.id)
+      ok++
+    } catch {
+      fail++
+    }
+  }
+  const gone = new Set(list.map((q) => q.id))
+  picked.value = picked.value.filter((id) => !gone.has(id))
+  await loadInquiries()
+  if (fail) flash('err', `删除完成：成功 ${ok} 条，失败 ${fail} 条（失败的可重试）`)
+  else flash('ok', `已删除 ${ok} 条工单`)
+}
+
+/** 勾选状态变了就撤销待确认，避免"勾完 A 又改成 B，结果删了旧的那一批" */
+watch(picked, clearConfirm)
+
+const EXPORT_HEADERS = [
+  '提交时间',
+  '姓名',
+  '邮箱 / 微信',
+  '项目类型',
+  '预算区间',
+  '项目简介',
+  '状态',
+  '内部备注',
+  '来源 IP',
+  '工单 ID'
+]
+
+function inquiryRow(q: InquiryView): (string | number)[] {
+  return [
+    formatDateTime(q.createdAt),
+    q.name || '',
+    q.contact || '',
+    q.type || '',
+    q.budget || '',
+    q.message || '',
+    STATUS_LABEL[q.status] || q.status,
+    q.note || '',
+    q.ip || '',
+    q.id
+  ]
+}
+
+function exportPicked() {
+  const list = filteredInquiries.value.filter((q) => picked.value.includes(q.id))
+  if (!list.length) {
+    flash('err', '还没有勾选工单')
+    return
+  }
+  downloadCsv(`工作对接-${fileStamp()}.csv`, [
+    EXPORT_HEADERS,
+    ...list.map(inquiryRow)
+  ])
+  flash('ok', `已导出 ${list.length} 条为表格文件`)
+}
+
+function exportAll() {
+  const list = filteredInquiries.value
+  if (!list.length) {
+    flash('err', '当前列表没有内容')
+    return
+  }
+  downloadCsv(`工作对接-${fileStamp()}.csv`, [
+    EXPORT_HEADERS,
+    ...list.map(inquiryRow)
+  ])
+  flash('ok', `已导出当前列表 ${list.length} 条`)
+}
 
 const inboxCounts = computed(() => ({
   all: inquiries.value.length,
@@ -257,18 +452,287 @@ async function rollback(id: number) {
 }
 
 /* ------------------------------ 素材库 / 账号 ------------------------------ */
-const mediaList = ref<any[]>([])
-async function loadMedia() {
-  try { mediaList.value = await adminApi.listMedia() } catch { /* ignore */ }
+const mediaList = ref<MediaItemView[]>([])
+
+/* ------------------------------ 素材库（需求 3） ------------------------------ */
+/**
+ * 素材库按「照片 / 视频」分开看，并标出每条被引用了几次。
+ *
+ * 引用计数是纯前端算的：直接扫一遍当前内容里所有 src / poster，
+ * 不新增接口。引用为 0 的就是「没人用的孤儿素材」，可以放心清理。
+ */
+const mediaFilter = ref<'all' | 'image' | 'video' | 'unused'>('all')
+const mediaSort = ref<'new' | 'size'>('new')
+const mediaQuery = ref('')
+
+/* ------------------------------ 素材标签 ------------------------------ */
+/**
+ * 标签筛选支持多选，取的是「同时具备」：
+ * 勾「直播」+「封面」得到的是既直播又是封面的那一小撮。
+ * 选就是 Filtering by narrowing 的直觉 —— 每多勾一个，结果只会更少而不会更多。
+ * 想要「直播或者封面」，分两次看就行。
+ */
+const mediaTags = ref<MediaTagView[]>([])
+const tagFilter = ref<string[]>([])
+
+function toggleTagFilter(name: string) {
+  const s = tagFilter.value.slice()
+  const i = s.indexOf(name)
+  if (i >= 0) s.splice(i, 1)
+  else s.push(name)
+  tagFilter.value = s
 }
-async function removeMedia(path: string) {
-  if (!confirm('删除素材？已发布的页面里引用它的位置会变成占位块。')) return
+
+const assetsOf = (m: MediaItemView) => m.tags || []
+const hasTagFilter = computed(() => tagFilter.value.length > 0)
+
+/** 素材 →「标签」按钮。单条走「以此为准」，批量走「按需追加」，差别在 MediaTagEditor 里说明 */
+const tagEditorOpen = ref(false)
+const tagEditorItems = ref<MediaItemView[]>([])
+function openTagEditor(items: MediaItemView[]) {
+  if (!items.length) return
+  tagEditorItems.value = items
+  tagEditorOpen.value = true
+}
+const tagManagerOpen = ref(false)
+
+async function loadTags() {
+  try { mediaTags.value = await adminApi.listTags(true) } catch { /* ignore */ }
+}
+
+function collectSrcs(node: any, out: Map<string, number>) {
+  if (!node || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    node.forEach((n) => collectSrcs(n, out))
+    return
+  }
+  for (const [k, v] of Object.entries(node)) {
+    if ((k === 'src' || k === 'poster') && typeof v === 'string' && v) {
+      out.set(v, (out.get(v) || 0) + 1)
+    } else if (v && typeof v === 'object') {
+      collectSrcs(v, out)
+    }
+  }
+}
+
+const mediaUsage = computed(() => {
+  const m = new Map<string, number>()
+  collectSrcs(content.value, m)
+  return m
+})
+
+const isVideoAsset = (m: MediaItemView) => (m.mime || '').startsWith('video/')
+
+const mediaSummary = computed(() => {
+  let img = 0
+  let vid = 0
+  let bytes = 0
+  for (const m of mediaList.value) {
+    bytes += Number(m.size || 0)
+    if (isVideoAsset(m)) vid++
+    else img++
+  }
+  return { img, vid, bytes }
+})
+
+const mediaUnusedCount = computed(
+  () => mediaList.value.filter((m) => !mediaUsage.value.has(m.url)).length
+)
+
+const mediaFiltered = computed(() => {
+  let list = mediaList.value.slice()
+  if (mediaFilter.value === 'image') list = list.filter((m) => !isVideoAsset(m))
+  else if (mediaFilter.value === 'video') list = list.filter((m) => isVideoAsset(m))
+  else if (mediaFilter.value === 'unused') {
+    list = list.filter((m) => !mediaUsage.value.has(m.url))
+  }
+
+  // 标签是「与」：每多勾一个标签，结果只会更少
+  if (tagFilter.value.length) {
+    list = list.filter((m) => tagFilter.value.every((t) => assetsOf(m).includes(t)))
+  }
+
+  const q = mediaQuery.value.trim().toLowerCase()
+  if (q) list = list.filter((m) => (m.url || '').toLowerCase().includes(q))
+
+  list.sort((a, b) =>
+    mediaSort.value === 'size'
+      ? Number(b.size || 0) - Number(a.size || 0)
+      : String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+  )
+  return list
+})
+
+function humanSize(n?: number) {
+  const b = Number(n || 0)
+  if (b < 1024) return b + ' B'
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB'
+  return (b / 1024 / 1024).toFixed(1) + ' MB'
+}
+
+async function loadMedia() {
+  try { mediaList.value = await adminApi.listMedia(true) } catch { /* ignore */ }
+  await loadTags()
+}
+
+/**
+ * 素材库被改动后，本地那份 `content` 也要跟着刷新。
+ * ---------------------------------------------------------------------------
+ * 删素材时后端会把模块里的引用摘掉并存成新版本，但后台内存里的 content 还是旧的，
+ * 不重新拉一次的话「被 N 处引用」那个角标会继续显示 —— 看着就像删除没生效。
+ */
+async function reloadContent() {
+  try { content.value = await fetchRemote() } catch { /* 拉不到就保留现状 */ }
+}
+
+/* --------------------- 批量选择与批量操作 --------------------- */
+const mediaSelected = ref<Set<string>>(new Set())
+const mediaBusy = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+const selectedPaths = computed(() => Array.from(mediaSelected.value))
+const selectedCount = computed(() => mediaSelected.value.size)
+/** 批量操作要拿到素材对象本身（打标签时需要它们现有的 tags），不只是路径 */
+const selectedItems = computed(() =>
+  mediaList.value.filter((m) => mediaSelected.value.has(m.path))
+)
+
+function toggleSelect(path: string) {
+  const s = new Set(mediaSelected.value)
+  if (s.has(path)) s.delete(path)
+  else s.add(path)
+  mediaSelected.value = s
+}
+
+/** 全选勾的是「当前筛选出来的」而不是全库 —— 过滤到第 3 页时不会误伤看不见的素材 */
+const allVisibleSelected = computed(
+  () => mediaFiltered.value.length > 0 && mediaFiltered.value.every((m) => mediaSelected.value.has(m.path))
+)
+function toggleSelectAllVisible() {
+  const s = new Set(mediaSelected.value)
+  if (allVisibleSelected.value) mediaFiltered.value.forEach((m) => s.delete(m.path))
+  else mediaFiltered.value.forEach((m) => s.add(m.path))
+  mediaSelected.value = s
+}
+function clearSelection() {
+  mediaSelected.value = new Set()
+}
+
+async function removeSelected() {
+  const paths = selectedPaths.value
+  if (!paths.length) return
+  if (!confirm(`删除选中的 ${paths.length} 个素材？它们在页面里被引用的地方会一并摘掉。`)) return
+  mediaBusy.value = true
   try {
-    await adminApi.deleteMedia(path)
-    await loadMedia()
-    flash('ok', '已删除')
+    const r = await adminApi.deleteMediaBatch(paths)
+    clearSelection()
+    await Promise.all([loadMedia(), reloadContent()])
+    let msg = `已删除 ${r.deleted} 个素材`
+    if (r.referencesRemoved) msg += `，同步移除 ${r.referencesRemoved} 处引用`
+    if (r.failed.length) msg += `，${r.failed.length} 个已不存在`
+    flash('ok', msg)
+  } catch (e: any) {
+    flash('err', e?.message || '批量删除失败')
+  } finally {
+    mediaBusy.value = false
+  }
+}
+
+/** 批量导入进度，例如「第 2/7 批（共 34 个文件 · 1.2 GB）」 */
+const uploadHint = ref('')
+
+/** 批量导入：自动分批，一批失败不连累其余，最后统一给结论 */
+async function importFiles(files: FileList | null) {
+  const list = files ? Array.from(files) : []
+  // 先清空 input —— 否则连续两次选同一批文件不会再触发 change
+  if (fileInput.value) fileInput.value.value = ''
+  if (!list.length) return
+
+  const totalBytes = list.reduce((n, f) => n + f.size, 0)
+  const label = `${list.length} 个文件 · ${humanSize(totalBytes)}`
+  mediaBusy.value = true
+  uploadHint.value = `准备上传 ${label}…`
+  try {
+    const items = await adminApi.uploadMany(list, [], (done, total) => {
+      uploadHint.value = `第 ${done}/${total} 批 · ${label}`
+    })
+    await finishImport(items)
+  } catch (e: any) {
+    // 分批之后仍有可能是「一半成功一半失败」：把成功的那半个照样入库、照样勾上，
+    // 再把失败的那几个批次点名告诉用户 —— 总比整批作废、让他从头再传一遍强
+    const partial: MediaBatchUploadItem[] = e?.partial || []
+    if (partial.length) {
+      await finishImport(partial)
+      flash('err', e?.message || '部分批次上传失败')
+    } else {
+      flash('err', e?.message || '上传失败')
+    }
+  } finally {
+    mediaBusy.value = false
+    uploadHint.value = ''
+  }
+}
+
+/** 上传收尾：刷新列表 → 汇总成败 → 自动勾上新素材（下一步多半就是打标签）→ 转述后处理的提醒 */
+async function finishImport(items: MediaBatchUploadItem[]) {
+  const bad = items.filter((i) => i.error)
+  const okN = items.length - bad.length
+  await loadMedia()
+
+  let msg = `上传完成：${okN} 个成功`
+  if (bad.length) {
+    msg += `，${bad.length} 个失败：`
+      + bad.slice(0, 3).map((i) => `${i.name}（${i.error}）`).join('；')
+      + (bad.length > 3 ? ` 等 ${bad.length} 个` : '')
+  }
+  flash(bad.length && !okN ? 'err' : 'ok', msg)
+
+  const urls = new Set(items.filter((i) => i.url).map((i) => i.url as string))
+  if (urls.size) {
+    mediaSelected.value = new Set(
+      mediaList.value.filter((m) => urls.has(m.url)).map((m) => m.path)
+    )
+  }
+
+  const warned = items.find((i) => i.warning)
+  if (warned) flash('err', `${warned.name}：${warned.warning}`)
+}
+
+async function removeMedia(path: string) {
+  if (!confirm('删除素材？页面里引用它的位置会被一并摘掉。')) return
+  try {
+    const r = await adminApi.deleteMedia(path)
+    await Promise.all([loadMedia(), reloadContent()])
+    flash('ok', r.referencesRemoved
+      ? `已删除，并同步移除 ${r.referencesRemoved} 处引用`
+      : '已删除（没有任何模块引用它）')
   } catch (e: any) {
     flash('err', e?.message || '删除失败')
+  }
+}
+
+/** 标签被改动后：素材列表里嵌着每条的 tags，标签清单本身的计数也变了，两个都得重拉 */
+async function onTagsSaved() {
+  clearSelection()
+  await Promise.all([loadMedia(), loadTags()])
+  flash('ok', '标签已更新')
+}
+
+/** 一键清掉没人引用的素材 —— 删除不可恢复，所以二次确认 + 列出条数 */
+async function cleanUnused() {
+  const unused = mediaList.value.filter((m) => !mediaUsage.value.has(m.url))
+  if (!unused.length) return flash('ok', '没有未使用的素材')
+  if (!confirm(`将删除 ${unused.length} 个未被任何模块引用的素材，且不可恢复。确定继续？`)) return
+  mediaBusy.value = true
+  try {
+    const r = await adminApi.deleteMediaBatch(unused.map((m) => m.path))
+    clearSelection()
+    await Promise.all([loadMedia(), reloadContent()])
+    flash('ok', `已清理 ${r.deleted} 个未使用素材`)
+  } catch (e: any) {
+    flash('err', e?.message || '清理失败')
+  } finally {
+    mediaBusy.value = false
   }
 }
 
@@ -412,8 +876,13 @@ onMounted(() => { loadMedia() })
         <h2 class="t-md">站点信息</h2>
         <FieldsEditor :fields="SITE_FIELDS" :model="content.site as any" />
 
-        <h2 class="t-md" style="margin-top: 32px">历史快照</h2>
-        <p class="small">每次保存都会留一份快照，改错了可以回滚。</p>
+        <h2 class="t-md" style="margin-top: 32px">
+          历史快照<i class="f-note">共 {{ revisions.length }} 条 · 自动保留最近 10 条</i>
+        </h2>
+        <p class="small">
+          每次保存都会留一份快照，改错了可以回滚。内容没变化不会重复存；
+          超过 10 条会自动删掉最老的，所以这里最多回退 10 步。
+        </p>
         <div v-for="r in revisions" :key="r.id" class="rev-row">
           <span>{{ new Date(r.createdAt).toLocaleString('zh-CN') }}</span>
           <i>{{ r.moduleCount }} 个模块 · {{ Math.round(r.bytes / 1024) }} KB</i>
@@ -426,21 +895,144 @@ onMounted(() => { loadMedia() })
         <h2 class="t-md">素材库</h2>
         <p class="small">
           素材存在服务器的持久卷里，<b>不在 Git 仓库中</b>，重新部署不会丢。
+          共 {{ mediaSummary.img }} 张照片 · {{ mediaSummary.vid }} 个视频 ·
+          合计 {{ humanSize(mediaSummary.bytes) }}。
         </p>
+
+        <div class="row-tools" style="margin: 12px 0">
+          <button class="mini" :class="{ on: mediaBusy }" :disabled="mediaBusy" @click="fileInput?.click()">
+            {{ mediaBusy ? '处理中…' : '批量导入（可多选文件）' }}
+          </button>
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm"
+            class="visually-hidden"
+            @change="importFiles(($event.target as HTMLInputElement).files)"
+          />
+          <span v-if="uploadHint" class="small upload-hint">{{ uploadHint }}</span>
+          <span v-else class="small">图片 / 视频均可，一次可以选多个；重名的会自动秒传去重。</span>
+        </div>
+
+        <!-- 标签筛选：多选 = 同时具备，每多勾一个结果只会更少 -->
+        <div class="tag-row">
+          <span class="tag-row__lab">标签</span>
+          <button class="tag-chip" :class="{ 'tag-chip--on': !hasTagFilter }" @click="tagFilter = []">
+            全部
+          </button>
+          <button
+            v-for="t in mediaTags"
+            :key="t.name"
+            class="tag-chip"
+            :class="{ 'tag-chip--on': tagFilter.includes(t.name) }"
+            @click="toggleTagFilter(t.name)"
+          >
+            {{ t.name }}<i>{{ t.count }}</i>
+          </button>
+          <span v-if="!mediaTags.length" class="small">
+            还没建过标签 —— 用素材卡片上的「标签」按钮新建一个。
+          </span>
+          <span v-if="hasTagFilter" class="small">
+            只看同时带 {{ tagFilter.map((t) => `「${t}」`).join(' + ') }} 的素材
+          </span>
+          <button class="mini push" @click="tagManagerOpen = true">管理标签</button>
+        </div>
+
+        <div class="filter-row">
+          <button class="mini" :class="{ on: mediaFilter === 'all' }" @click="mediaFilter = 'all'">
+            全部 ({{ mediaList.length }})
+          </button>
+          <button class="mini" :class="{ on: mediaFilter === 'image' }" @click="mediaFilter = 'image'">
+            照片 ({{ mediaSummary.img }})
+          </button>
+          <button class="mini" :class="{ on: mediaFilter === 'video' }" @click="mediaFilter = 'video'">
+            视频 ({{ mediaSummary.vid }})
+          </button>
+          <button class="mini" :class="{ on: mediaFilter === 'unused' }" @click="mediaFilter = 'unused'">
+            未使用 ({{ mediaUnusedCount }})
+          </button>
+          <button class="mini" @click="toggleSelectAllVisible">
+            {{ allVisibleSelected ? '取消全选' : `全选当前 (${mediaFiltered.length})` }}
+          </button>
+          <select v-model="mediaSort" class="push">
+            <option value="new">最新在前</option>
+            <option value="size">体积从大到小</option>
+          </select>
+          <input v-model="mediaQuery" class="mini-input" placeholder="搜索文件名…" />
+        </div>
+
         <div class="media-grid-lib">
-          <div v-for="m in mediaList" :key="m.path" class="lib-item">
-            <video v-if="m.mime.startsWith('video/')" :src="m.url" muted />
-            <img v-else :src="m.url" alt="" />
+          <div
+            v-for="m in mediaFiltered"
+            :key="m.path"
+            class="lib-item"
+            :class="{ 'lib-item--on': mediaSelected.has(m.path) }"
+            @click="toggleSelect(m.path)"
+          >
+            <label class="lib-check" @click.stop>
+              <input type="checkbox" :checked="mediaSelected.has(m.path)" @change="toggleSelect(m.path)" />
+            </label>
+            <video v-if="isVideoAsset(m)" :src="m.url" muted playsinline preload="metadata"></video>
+            <img v-else :src="m.url" alt="" loading="lazy" />
+            <span class="lib-item__kind">{{ isVideoAsset(m) ? '▶ 视频' : '🖼 照片' }}</span>
+            <span class="lib-item__size">{{ humanSize(m.size) }}</span>
+            <div v-if="m.tags?.length" class="lib-item__tags">
+              <span v-for="t in m.tags" :key="t">{{ t }}</span>
+            </div>
             <div class="lib-item__bar">
               <i>{{ m.url }}</i>
               <span class="row-tools">
-                <a class="mini" :href="m.url" target="_blank" rel="noreferrer">打开</a>
-                <button class="mini danger" @click="removeMedia(m.path)">删除</button>
+                <b v-if="mediaUsage.get(m.url)" class="lib-use">被 {{ mediaUsage.get(m.url) }} 处引用</b>
+                <b v-else class="lib-use lib-use--none">未使用</b>
+                <button class="mini" @click.stop="openTagEditor([m])">
+                  标签<template v-if="m.tags?.length">({{ m.tags.length }})</template>
+                </button>
+                <a class="mini" :href="m.url" target="_blank" rel="noreferrer" @click.stop>打开</a>
+                <button class="mini danger" @click.stop="removeMedia(m.path)">删除</button>
               </span>
             </div>
           </div>
         </div>
-        <p v-if="!mediaList.length" class="small">还没有素材，去「模块」里上传。</p>
+
+        <p v-if="!mediaList.length" class="small">还没有素材，用上面的「批量导入」或去「模块」里上传。</p>
+        <p v-else-if="!mediaFiltered.length" class="small">没有符合条件的文件。</p>
+
+        <div class="row-tools" style="margin-top: 14px">
+          <button class="mini" @click="loadMedia">刷新</button>
+          <button class="mini danger" :disabled="mediaBusy" @click="cleanUnused">清理未使用素材</button>
+        </div>
+
+        <!-- 选中若干条后浮出操作条 —— 没选中时不占版面 -->
+        <Transition name="pop">
+          <div v-if="selectedCount" class="bulk-bar glass">
+            <span>已选中 <b>{{ selectedCount }}</b> 个素材</span>
+            <span class="row-tools">
+              <button class="mini" @click="clearSelection">取消选择</button>
+              <button class="mini" :disabled="mediaBusy" @click="openTagEditor(selectedItems)">
+                打标签
+              </button>
+              <button class="mini danger" :disabled="mediaBusy" @click="removeSelected">
+                {{ mediaBusy ? '删除中…' : `删除所选 (${selectedCount})` }}
+              </button>
+            </span>
+          </div>
+        </Transition>
+
+        <!-- 打标签 / 管理标签。放 .glass 外面会被 backdrop-filter 拽偏，两个组件内部都 Teleport 到 body 了 -->
+        <MediaTagEditor
+          :open="tagEditorOpen"
+          :items="tagEditorItems"
+          :all-tags="mediaTags"
+          @close="tagEditorOpen = false"
+          @saved="onTagsSaved"
+        />
+        <MediaTagManager
+          :open="tagManagerOpen"
+          :tags="mediaTags"
+          @close="tagManagerOpen = false"
+          @changed="onTagsSaved"
+        />
       </section>
 
       <!-- 监控 tab -->
@@ -466,21 +1058,25 @@ onMounted(() => { loadMedia() })
               <b>{{ stats.today.visitors }}</b>
               <span>今日访客</span>
               <i>{{ stats.today.sessions }} 次访问</i>
+              <em :class="deltaClass(stats.todayDelta?.visitors)">{{ deltaArrow(stats.todayDelta?.visitors) }}</em>
             </div>
             <div class="stat-card">
               <b>{{ humanDuration(stats.today.avgDurationMs) }}</b>
               <span>平均停留</span>
               <i>单次访问</i>
+              <em :class="deltaClass(stats.todayDelta?.avgDurationMs)">{{ deltaArrow(stats.todayDelta?.avgDurationMs) }}</em>
             </div>
             <div class="stat-card">
               <b>{{ stats.today.plays }}</b>
               <span>作品播放</span>
               <i>{{ stats.today.playedSessions }} 人点开过</i>
+              <em :class="deltaClass(stats.todayDelta?.plays)">{{ deltaArrow(stats.todayDelta?.plays) }}</em>
             </div>
             <div class="stat-card">
               <b>{{ stats.today.playRate }}%</b>
               <span>播放率</span>
               <i>点开作品 / 总访问</i>
+              <em :class="deltaClass(stats.todayDelta?.playRate)">{{ deltaArrow(stats.todayDelta?.playRate) }}</em>
             </div>
             <div class="stat-card">
               <b>{{ stats.inquiry.new }}</b>
@@ -489,20 +1085,8 @@ onMounted(() => { loadMedia() })
             </div>
           </div>
 
-          <h3 class="sub">每日访问</h3>
-          <div v-if="stats.series.length" class="bars">
-            <div v-for="d in stats.series" :key="d.day" class="bars__col">
-              <div class="bars__track">
-                <span
-                  class="bars__bar"
-                  :style="{ height: Math.max(4, Math.round((d.sessions / maxSeries) * 100)) + '%' }"
-                  :title="`${d.sessions} 次访问 · ${d.plays} 次播放`"
-                ></span>
-              </div>
-              <i>{{ d.day.slice(5) }}</i>
-            </div>
-          </div>
-          <p v-else class="small">还没有数据，去前台刷几下页面就有了。</p>
+          <!-- 图表板块：趋势 / 热力 / 地域 / 设备来源 / 漏斗（手写 SVG，见 StatsCharts） -->
+          <StatsCharts :stats="stats" :human-duration="humanDuration" />
 
           <div class="two-col">
             <div>
@@ -520,7 +1104,7 @@ onMounted(() => { loadMedia() })
                 <span class="mono small">{{ v.startedAt?.slice(11, 19) || '—' }}</span>
                 <b>{{ humanDuration(v.durationMs) }}</b>
                 <i>{{ v.playCount }} 次播放</i>
-                <i>{{ v.ua }}</i>
+                <i>{{ v.region || '未知' }} · {{ v.device || v.ua }}</i>
               </div>
               <p v-if="!stats.recent.length" class="small">暂无记录。</p>
             </div>
@@ -535,9 +1119,25 @@ onMounted(() => { loadMedia() })
           <h2 class="t-md">工作对接</h2>
           <div class="row-tools">
             <button class="mini" @click="loadInquiries">刷新</button>
+            <button class="mini" @click="exportPicked">
+              导出所选<template v-if="pickedCount"> ({{ pickedCount }})</template>
+            </button>
+            <button class="mini" @click="exportAll">导出当前列表</button>
+            <button
+              class="mini"
+              :class="{ danger: !confirmDelete, 'danger is-armed': confirmDelete }"
+              @click="askDeletePicked"
+            >
+              <template v-if="confirmDelete">再点一次确认删除 {{ pickedCount }} 条</template>
+              <template v-else>删除所选<template v-if="pickedCount"> ({{ pickedCount }})</template></template>
+            </button>
           </div>
         </div>
-        <p class="small">网站底部提交的项目需求都进这里，标记状态、写内部备注、处理完归档。</p>
+        <p class="small">
+          网站底部提交的项目需求都进这里，标记状态、写内部备注、处理完归档。
+          勾选任意几条后可批量导出成表格文件（CSV，Excel / WPS 可直接打开），
+          也可以批量删除 —— 删除<b>不可恢复</b>，所以删除按钮要连点两次才会执行。
+        </p>
 
         <div class="filter-row">
           <button
@@ -549,19 +1149,68 @@ onMounted(() => { loadMedia() })
           >
             {{ f === 'all' ? '全部' : STATUS_LABEL[f] }} ({{ inboxCounts[f] }})
           </button>
+
+          <span class="inbox-pickall">
+            <label class="inbox-pickall__all">
+              <input
+                type="checkbox"
+                :checked="allPicked"
+                @change="toggleAll(($event.target as HTMLInputElement).checked)"
+              />
+              全选当前列表
+            </label>
+            <button v-if="pickedCount" class="mini" @click="toggleAll(false)">清空选择</button>
+          </span>
         </div>
 
         <div v-for="q in filteredInquiries" :key="q.id" class="inbox-item" :class="`is-${q.status}`">
           <div class="inbox-item__head">
-            <b>{{ q.name || '匿名' }}</b>
-            <i>{{ q.contact }}</i>
+            <label class="inbox-check">
+              <input
+                type="checkbox"
+                :checked="isPicked(q.id)"
+                :aria-label="`选择工单 ${q.id}`"
+                @change="togglePick(q.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <span class="small mono">#{{ q.id }}</span>
+            </label>
+            <span class="tag tag--status">{{ STATUS_LABEL[q.status] }}</span>
             <span v-if="q.type" class="tag">{{ q.type }}</span>
             <span v-if="q.budget" class="tag tag--ghost">{{ q.budget }}</span>
-            <span class="tag tag--status">{{ STATUS_LABEL[q.status] }}</span>
-            <span class="small push">{{ q.createdAt ? new Date(q.createdAt).toLocaleString('zh-CN') : '' }}</span>
+            <span class="small push mono">{{ formatDateTime(q.createdAt) }}</span>
           </div>
 
-          <p class="body">{{ q.message }}</p>
+          <!-- 与前台表单一一对应的字段：姓名 / 邮箱·微信 / 项目类型 / 预算区间 / 项目简介 -->
+          <dl class="inbox-fields">
+            <div class="inbox-f">
+              <dt>姓名</dt>
+              <dd>{{ q.name || '—' }}</dd>
+            </div>
+            <div class="inbox-f">
+              <dt>邮箱 / 微信</dt>
+              <dd>{{ q.contact || '—' }}</dd>
+            </div>
+            <div class="inbox-f">
+              <dt>项目类型</dt>
+              <dd>{{ q.type || '—' }}</dd>
+            </div>
+            <div class="inbox-f">
+              <dt>预算区间</dt>
+              <dd>{{ q.budget || '—' }}</dd>
+            </div>
+            <div class="inbox-f">
+              <dt>提交时间</dt>
+              <dd class="mono">{{ formatDateTime(q.createdAt) }}</dd>
+            </div>
+            <div class="inbox-f">
+              <dt>来源 IP</dt>
+              <dd class="mono">{{ q.ip || '—' }}</dd>
+            </div>
+            <div class="inbox-f inbox-f--full">
+              <dt>项目简介</dt>
+              <dd class="inbox-f__msg">{{ q.message || '—' }}</dd>
+            </div>
+          </dl>
 
           <div class="inbox-item__foot">
             <input
@@ -578,7 +1227,6 @@ onMounted(() => { loadMedia() })
               <button class="mini danger" @click="removeInquiry(q)">删除</button>
             </span>
           </div>
-          <p class="small inbox-item__ip">来源 IP {{ q.ip }} · ID {{ q.id }}</p>
         </div>
 
         <p v-if="!filteredInquiries.length" class="small">
@@ -617,3 +1265,64 @@ onMounted(() => { loadMedia() })
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ---------------- 素材库：勾选 + 批量操作条 ---------------- */
+.media-grid-lib { position: relative; }
+
+.lib-item { position: relative; cursor: pointer; }
+.lib-item--on {
+  outline: 2px solid var(--accent, #2997ff);
+  outline-offset: 1px;
+}
+
+.lib-check {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  display: flex;
+}
+.lib-check input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--accent, #2997ff);
+}
+
+.bulk-bar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 14px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pop-enter-active,
+.pop-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.pop-enter-from,
+.pop-leave-to { opacity: 0; transform: translateY(6px); }
+
+/* 批量导入进行中的批次进度：大文件传几十秒，没有它就以为卡死了 */
+.upload-hint {
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+}
+</style>

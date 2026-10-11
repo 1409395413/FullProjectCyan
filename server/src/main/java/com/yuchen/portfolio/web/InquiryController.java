@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +33,15 @@ public class InquiryController {
 
   private static final List<String> STATUSES = List.of("new", "contacted", "archived");
 
+  /** 同一个 IP 一分钟内的提交上限：第 6 次开始拒绝（一分钟内超过五次就限制）。 */
+  private static final int INQUIRY_LIMIT_PER_MINUTE = 5;
+
+  /** 触发上限后的冷却时长：10 分钟。冷却期内再提交一律拒绝。 */
+  private static final long INQUIRY_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(10);
+
+  /** 冷却期内（以及刚触发时）返回给前台的提示语。 */
+  private static final String INQUIRY_LIMIT_MESSAGE = "多次提交请十分钟后提交";
+
   private final InquiryRepository repo;
   private final AuditService audit;
   private final RateLimiter limiter;
@@ -48,8 +58,9 @@ public class InquiryController {
   public ResponseEntity<Map<String, String>> submit(@Valid @RequestBody InquiryRequest req,
       HttpServletRequest http) {
     String ip = IpUtil.clientIp(http);
-    if (!limiter.allow("inquiry:" + ip, 5)) {
-      throw ApiException.tooManyRequests("留言过于频繁，请稍后再试");
+    if (!limiter.allow("inquiry:" + ip, INQUIRY_LIMIT_PER_MINUTE,
+        TimeUnit.MINUTES.toMillis(1), INQUIRY_COOLDOWN_MS)) {
+      throw ApiException.tooManyRequests(INQUIRY_LIMIT_MESSAGE);
     }
 
     Inquiry q = new Inquiry();

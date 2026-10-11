@@ -454,11 +454,10 @@ ul{margin:0;padding:0;list-style:none}
 .spec dd{margin:0;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
 
 /* ---------- QUOTE BAND ---------- */
+/* 说明：原来这里有一层 ::before 白色径向光斑（锚在左上角 15% 0%），
+   本意是给金句"打一束顶光"，但它压在 .glass 自己的镜面高光上，
+   在圆角卡片里显得像一块没铺满的多边形 —— 左上角尤其明显，已整体移除。 */
 .quote{padding:clamp(40px,5vw,72px);text-align:center;overflow:hidden}
-.quote::before{
-  content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:.5;
-  background:radial-gradient(120% 120% at 15% 0%, rgba(255,255,255,.85), transparent 55%);
-}
 .quote .t-lg{max-width:22ch;margin:0 auto}
 .quote p{margin:20px auto 0;max-width:52ch}
 
@@ -497,9 +496,19 @@ ul{margin:0;padding:0;list-style:none}
 .footer li{padding:5px 0}
 .footer li a{font-size:14px;color:var(--ink-2);text-decoration:none}
 .footer li a:hover{color:var(--accent);text-decoration:none}
-.footer__bottom{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-top:44px;font-size:13px;color:var(--ink-3)}
+.footer__bottom{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;margin-top:44px;font-size:13px;color:var(--ink-3)}
 .to-top{color:var(--ink-2);text-decoration:none}
 .to-top:hover{color:var(--accent);text-decoration:none}
+
+/* ---------- 页脚备案信息（ICP + 公安）---------- */
+.footer__legal{display:inline-flex;align-items:center;flex-wrap:wrap;gap:7px}
+.footer__sep{opacity:.4}
+.beian{display:inline-flex;align-items:center;gap:5px;color:var(--ink-2);text-decoration:none;white-space:nowrap}
+.beian:hover{color:var(--accent);text-decoration:none}
+.beian--police svg{flex:none;color:#2f6fed}
+@media (max-width:700px){
+  .footer__bottom{flex-direction:column;align-items:flex-start;gap:10px}
+}
 
 .admin-cta{position:fixed;right:18px;bottom:18px;z-index:90}
 
@@ -574,7 +583,131 @@ ul{margin:0;padding:0;list-style:none}
   .fact,.spec,.row-i,.case,.about__facts,.specs,.rows{border-color:rgba(255,255,255,.12)}
 }
 
+/* ---- 昼夜手动切换：以下两块由 gen-theme-css.js 从上方系统暗色块生成 ----
+   第一块：没手动选过才跟随系统；第二块：手动选了夜间就强制生效。
+   改动上方暗色样式后请重新生成本块，否则手动切换会漏掉新样式。 ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0b0b0d;--ink:#f5f5f7;--ink-2:#a1a1a6;--ink-3:#86868b;--hair:#2c2c2e;--card:#1c1c1e;
+    --accent:#2997ff;--accent-hover:#47a6ff;--accent-soft:rgba(41,151,255,.16);
+    --glass:rgba(30,30,34,.62);--glass-2:rgba(30,30,34,.45);--glass-stroke:rgba(255,255,255,.12);
+    --sh-m:0 12px 36px rgba(0,0,0,.5);--sh-l:0 30px 80px rgba(0,0,0,.65);
+
+    /* 深色模式：素材框要跟着变深，镜面高光要收敛，否则会出现刺眼的白斑 */
+    --ph-bg:linear-gradient(150deg,#26262b,#151519);
+    --ph-ink:#8a8a90;
+    --field-bg:rgba(255,255,255,.08);
+    --field-bg-focus:rgba(255,255,255,.14);
+    --spec:0.22;
+  }
+  :root:not([data-theme="light"]) .mesh {
+    background:
+      radial-gradient(900px 620px at 10% -8%, rgba(10,132,255,.30), transparent 62%),
+      radial-gradient(820px 640px at 92% 2%,  rgba(191,90,242,.24), transparent 64%),
+      radial-gradient(1000px 720px at 62% 104%,rgba(255,159,10,.16), transparent 62%),
+      linear-gradient(180deg,#0a0a0c 0%,#0b0b0d 42%,#0e0f14 100%);
+  }
+  :root:not([data-theme="light"]) .mesh::after {opacity:.28}
+  :root:not([data-theme="light"]) .glass {background:linear-gradient(135deg, rgba(60,60,68,.62), rgba(30,30,36,.45));box-shadow:var(--sh-m), inset 0 1px 0 rgba(255,255,255,.14)}
+  :root:not([data-theme="light"]) .glass::before {background:radial-gradient(120% 80% at 12% 0%, rgba(255,255,255,.16), transparent 46%);opacity:1}
+  :root:not([data-theme="light"]) .nav__pill {background:linear-gradient(135deg, rgba(60,60,68,.72), rgba(30,30,36,.55))}
+  :root:not([data-theme="light"]) .nav__link:hover {background:rgba(255,255,255,.10)}
+  :root:not([data-theme="light"]) .nav__link.is-active {background:#f5f5f7;color:#1d1d1f}
+  :root:not([data-theme="light"]) .chip {background:linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.05));color:#f5f5f7}
+  :root:not([data-theme="light"]) .chip--flat {background:rgba(255,255,255,.08);color:var(--ink-2)}
+  :root:not([data-theme="light"]) .btn--ghost {background:linear-gradient(135deg, rgba(255,255,255,.12), rgba(255,255,255,.05));color:#f5f5f7}
+  :root:not([data-theme="light"]) .ph {border-color:rgba(255,255,255,.18)}
+  :root:not([data-theme="light"]) .play {background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.2)}
+  :root:not([data-theme="light"]) .play svg {fill:#fff}
+  :root:not([data-theme="light"]) .field input,
+  :root:not([data-theme="light"]) .field select,
+  :root:not([data-theme="light"]) .field textarea {background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.14);color:#f5f5f7}
+  :root:not([data-theme="light"]) .field input::placeholder,
+  :root:not([data-theme="light"]) .field textarea::placeholder {color:#71717a}
+  :root:not([data-theme="light"]) .sitem {background:linear-gradient(150deg,#2c2c31,#191920)}
+  :root:not([data-theme="light"]) .fact,
+  :root:not([data-theme="light"]) .spec,
+  :root:not([data-theme="light"]) .row-i,
+  :root:not([data-theme="light"]) .case,
+  :root:not([data-theme="light"]) .about__facts,
+  :root:not([data-theme="light"]) .specs,
+  :root:not([data-theme="light"]) .rows {border-color:rgba(255,255,255,.12)}
+}
+  :root[data-theme="dark"] {
+    --bg:#0b0b0d;--ink:#f5f5f7;--ink-2:#a1a1a6;--ink-3:#86868b;--hair:#2c2c2e;--card:#1c1c1e;
+    --accent:#2997ff;--accent-hover:#47a6ff;--accent-soft:rgba(41,151,255,.16);
+    --glass:rgba(30,30,34,.62);--glass-2:rgba(30,30,34,.45);--glass-stroke:rgba(255,255,255,.12);
+    --sh-m:0 12px 36px rgba(0,0,0,.5);--sh-l:0 30px 80px rgba(0,0,0,.65);
+
+    /* 深色模式：素材框要跟着变深，镜面高光要收敛，否则会出现刺眼的白斑 */
+    --ph-bg:linear-gradient(150deg,#26262b,#151519);
+    --ph-ink:#8a8a90;
+    --field-bg:rgba(255,255,255,.08);
+    --field-bg-focus:rgba(255,255,255,.14);
+    --spec:0.22;
+  }
+  :root[data-theme="dark"] .mesh {
+    background:
+      radial-gradient(900px 620px at 10% -8%, rgba(10,132,255,.30), transparent 62%),
+      radial-gradient(820px 640px at 92% 2%,  rgba(191,90,242,.24), transparent 64%),
+      radial-gradient(1000px 720px at 62% 104%,rgba(255,159,10,.16), transparent 62%),
+      linear-gradient(180deg,#0a0a0c 0%,#0b0b0d 42%,#0e0f14 100%);
+  }
+  :root[data-theme="dark"] .mesh::after {opacity:.28}
+  :root[data-theme="dark"] .glass {background:linear-gradient(135deg, rgba(60,60,68,.62), rgba(30,30,36,.45));box-shadow:var(--sh-m), inset 0 1px 0 rgba(255,255,255,.14)}
+  :root[data-theme="dark"] .glass::before {background:radial-gradient(120% 80% at 12% 0%, rgba(255,255,255,.16), transparent 46%);opacity:1}
+  :root[data-theme="dark"] .nav__pill {background:linear-gradient(135deg, rgba(60,60,68,.72), rgba(30,30,36,.55))}
+  :root[data-theme="dark"] .nav__link:hover {background:rgba(255,255,255,.10)}
+  :root[data-theme="dark"] .nav__link.is-active {background:#f5f5f7;color:#1d1d1f}
+  :root[data-theme="dark"] .chip {background:linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.05));color:#f5f5f7}
+  :root[data-theme="dark"] .chip--flat {background:rgba(255,255,255,.08);color:var(--ink-2)}
+  :root[data-theme="dark"] .btn--ghost {background:linear-gradient(135deg, rgba(255,255,255,.12), rgba(255,255,255,.05));color:#f5f5f7}
+  :root[data-theme="dark"] .ph {border-color:rgba(255,255,255,.18)}
+  :root[data-theme="dark"] .play {background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.2)}
+  :root[data-theme="dark"] .play svg {fill:#fff}
+  :root[data-theme="dark"] .field input,
+  :root[data-theme="dark"] .field select,
+  :root[data-theme="dark"] .field textarea {background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.14);color:#f5f5f7}
+  :root[data-theme="dark"] .field input::placeholder,
+  :root[data-theme="dark"] .field textarea::placeholder {color:#71717a}
+  :root[data-theme="dark"] .sitem {background:linear-gradient(150deg,#2c2c31,#191920)}
+  :root[data-theme="dark"] .fact,
+  :root[data-theme="dark"] .spec,
+  :root[data-theme="dark"] .row-i,
+  :root[data-theme="dark"] .case,
+  :root[data-theme="dark"] .about__facts,
+  :root[data-theme="dark"] .specs,
+  :root[data-theme="dark"] .rows {border-color:rgba(255,255,255,.12)}
+
 @media (prefers-reduced-motion:reduce){
   *{animation:none !important;transition-duration:.01ms !important}
   .reveal{opacity:1;transform:none}
+}
+
+/* ===========================================================================
+   素材保护（前台）
+   -webkit-touch-callout 管的是 iOS 长按弹出的「存储到照片」菜单，
+   user-drag 管的是往桌面 / 别的标签页拖图片的行为。
+   注意这层薄壳防不住任何一个愿意开 F12 的人 —— 详见 main.ts 里 installMediaGuard 的说明。
+   后台 /admin 的素材由 MediaFrame 单独处理同一套规则，这里不额外干预。
+   =========================================================================== */
+img, video {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+}
+
+/* ===========================================================================
+   主题切换的渐进过渡（临时类）
+   ThemeDock 在按日出日落切主题的那一瞬间给 <html> 挂上 theme-fading，
+   让全站颜色一起用 1.2s 过渡完，再摘掉。
+   不常驻的原因：全局 transition 会顶掉各组件自己的 hover / reveal 动画，
+   只在切换那一瞬间借用一下，代价最小。
+   =========================================================================== */
+html.theme-fading,
+html.theme-fading *,
+html.theme-fading *::before,
+html.theme-fading *::after {
+  transition: background-color 1.2s ease, color 1.2s ease, border-color 1.2s ease,
+              fill 1.2s ease, stroke 1.2s ease, box-shadow 1.2s ease,
+              opacity 1.2s ease !important;
 }
